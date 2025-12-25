@@ -528,15 +528,53 @@ function syncTeamsFromDOM(){
   state.teamB = sortByElderFirst(B.filter(p=>p.gender==="남")).concat(sortByElderFirst(B.filter(p=>p.gender==="여")));
 }
 
+/* ===================== ✅ 여기만 수정 (경기표 안 사라지고 실시간 반영) ===================== */
 function regenerateScheduleAfterTeamChange(){
+  // 경기표를 '지우지' 않기 위해,
+  // 1) 아직 경기 생성 전이면 아무 것도 하지 않고
+  // 2) 드래그 중 onRemove로 잠깐 비는 순간에도 초기화하지 않음
+  const hasSchedule = (state.matchesM?.length || 0) + (state.matchesF?.length || 0) + (state.mixed?.slots ? 1 : 0) > 0;
+  if(!hasSchedule) return;
+
+  // 드래그 중 잠깐 팀이 비는 순간(onRemove)에는 유지
   if(!state.teamA?.length || !state.teamB?.length){
-    state.matchesM=[]; state.matchesF=[];
-    state.mixed={slots:null,scoreA:"",scoreB:"",note:"팀 배정 후 경기 생성이 가능합니다."};
-    renderMatches(); renderMixed(); recomputeScoreboard();
     return;
   }
+
+  // 점수 유지용 백업(인덱스 기준)
+  const oldMScores = (state.matchesM||[]).map(m=>({scoreA:m.scoreA, scoreB:m.scoreB}));
+  const oldFScores = (state.matchesF||[]).map(m=>({scoreA:m.scoreA, scoreB:m.scoreB}));
+  const oldMix = { scoreA: state.mixed?.scoreA ?? "", scoreB: state.mixed?.scoreB ?? "" };
+
+  // 경기 재구성 (원래 로직 그대로 사용)
   makeMatchesAndMixed(true);
+
+  // 점수 복원 (가능한 범위만)
+  state.matchesM.forEach((m,i)=>{
+    if(oldMScores[i]){
+      m.scoreA = oldMScores[i].scoreA ?? "";
+      m.scoreB = oldMScores[i].scoreB ?? "";
+    }
+  });
+  state.matchesF.forEach((m,i)=>{
+    if(oldFScores[i]){
+      m.scoreA = oldFScores[i].scoreA ?? "";
+      m.scoreB = oldFScores[i].scoreB ?? "";
+    }
+  });
+  if(state.mixed){
+    state.mixed.scoreA = oldMix.scoreA;
+    state.mixed.scoreB = oldMix.scoreB;
+  }
+
+  // UI 즉시 반영
+  renderMatches();
+  renderMixed();
+  recomputeScoreboard();
+
+  saveStateDebounced();
 }
+/* ===================== ✅ 수정 끝 ===================== */
 
 function setupTeamSortables(){
   const unlocked=isUnlocked();
@@ -625,11 +663,7 @@ function removeFromPool(pool, picked){
 }
 
 /* =========================================================
-   ✅ 혼합복식 "나이대 비슷하게" 개선 로직 (여기만 변경됨)
-   - A팀 남/여 1명씩 확정
-   - B팀은 남×여 조합 후보 중에서
-     (A팀 평균출생연도)와 (B팀 평균출생연도) 차이가 최소인 조합 선택
-   - 남는 인원 우선 사용, 부족하면 같은 팀에서(이미 뛴 사람 우선) 채움
+   ✅ 혼합복식 "나이대 비슷하게" 개선 로직
 ========================================================= */
 function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
   const A_m_left=shuffle(leftAm);
@@ -643,7 +677,6 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
     return played[0] || notPlayed[0] || null;
   }
 
-  // 1) A팀 남/여 구성(남는 인원 우선)
   let Am = A_m_left.shift() || null;
   let Af = A_f_left.shift() || null;
 
@@ -654,7 +687,6 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
 
   const targetAvg = (Am.year + Af.year) / 2;
 
-  // 2) B팀 후보 풀(남는 인원 우선, 없으면 팀 전체에서 보충)
   let BmPool = shuffle([...leftBm]);
   let BfPool = shuffle([...leftBf]);
 
@@ -667,13 +699,10 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
     BfPool = shuffle(extra);
   }
 
-  // B팀에 남/여 자체가 없으면 불가
   if(!BmPool.length || !BfPool.length){
     return {slots:null, note:"B팀에서 혼복(남+여) 구성이 불가능합니다."};
   }
 
-  // 3) "남×여 조합" 중 평균 출생연도가 targetAvg에 가장 가까운 조합 선택
-  //    (풀 크기 커져도 최대 60명이라 충분히 빠름. 그래도 안전하게 상한을 둠)
   const maxM = Math.min(BmPool.length, 12);
   const maxF = Math.min(BfPool.length, 12);
   let best=null;
@@ -684,8 +713,6 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
       const bm=BmPool[i], bf=BfPool[j];
       const avg = (bm.year + bf.year) / 2;
       const diff = Math.abs(avg - targetAvg);
-
-      // 2게임 최소화: diff가 같으면 "이미 뛴 사람" 조합을 더 우선(혼복 채우기용)
       const playedScore = (used.has(keyOf(bm))?1:0) + (used.has(keyOf(bf))?1:0);
 
       if(diff < bestDiff){
@@ -702,7 +729,6 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
   const Bm = best?.bm || BmPool[0];
   const Bf = best?.bf || BfPool[0];
 
-  // left 풀에서 제거(있을 때만)
   removeFromPool(leftBm, Bm);
   removeFromPool(leftBf, Bf);
 
@@ -711,7 +737,6 @@ function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
     note:"혼복은 양 팀 평균 출생연도가 가장 비슷한 조합으로 매칭했습니다."
   };
 }
-/* ===================== (혼복 개선 끝) ===================== */
 
 function renderLeftovers(leftMale, leftFemale){
   const lm = $("leftM");
