@@ -16,18 +16,23 @@
 
   <style>
     .watermark {
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       pointer-events: none;
       z-index: 0;
       display: grid;
       place-items: center;
-      opacity: 0.5; /* 요청: 50 */
+      opacity: 0.5; /* 50% */
       filter: grayscale(100%) blur(1px);
       transform: rotate(-10deg);
     }
     .watermark img { width: min(700px, 70vw); height: auto; }
     .content-layer { position: relative; z-index: 1; }
+
+    /* 뷰어 모드에서 클릭/편집 방지 스타일(입력 비활성은 JS에서) */
+    .locked-badge {
+      background: rgba(15, 23, 42, 0.08);
+      border: 1px solid rgba(15, 23, 42, 0.12);
+    }
 
     @media print {
       .no-print { display: none !important; }
@@ -36,7 +41,7 @@
       input, textarea { border: 0 !important; background: transparent !important; }
       .watermark { opacity: 0.2; }
       details { border: 1px solid #e5e7eb !important; }
-      summary { display:none !important; } /* 인쇄 시 이벤트는 펼친 상태만 보이게(기본 open 권장) */
+      summary { display:none !important; }
     }
   </style>
 </head>
@@ -47,45 +52,75 @@
     <img id="watermarkImg" alt="BADMAX watermark" />
   </div>
 
-  <div class="content-layer max-w-6xl mx-auto p-4 md:p-6">
+  <div class="content-layer max-w-6xl mx-auto p-3 sm:p-4 md:p-6">
 
     <!-- Header -->
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
       <div class="flex items-start gap-3">
         <div class="shrink-0">
           <img id="brandLogo" class="w-14 h-14 rounded-2xl object-contain bg-white border border-slate-200 shadow-sm p-1"
                alt="BADMAX Logo" />
         </div>
-        <div>
-          <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">
+        <div class="min-w-0">
+          <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
             배드맥스 <span id="ymBadge" class="px-2 py-1 rounded-xl font-extrabold"></span> 월례대회
           </h1>
+          <div class="mt-2 flex flex-wrap items-center gap-2">
+            <span id="modeBadge" class="locked-badge text-slate-800 text-xs font-bold px-2 py-1 rounded-xl">
+              🔒 뷰어 모드(읽기 전용)
+            </span>
+            <span class="text-xs text-slate-500">
+              새로고침해도 명단/경기/점수/로고가 유지됩니다(이 기기에서).
+            </span>
+          </div>
         </div>
       </div>
 
       <div class="no-print flex gap-2 flex-wrap">
-        <label class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100 cursor-pointer">
+        <!-- 관리자 잠금 해제 -->
+        <button id="btnUnlock" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-800">
+          관리자 모드
+        </button>
+
+        <!-- 로고: 기본은 숨김(로고 없을 때만 표시), 관리자에서만 변경 -->
+        <label id="logoLabel" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100 cursor-pointer hidden">
           로고
           <input id="logoInput" type="file" accept="image/*" class="hidden" />
         </label>
-        <button id="btnPrint" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-800">인쇄/출력</button>
-        <button id="btnReset" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">초기화</button>
+
+        <button id="btnPrint" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+          인쇄/출력
+        </button>
+
+        <button id="btnReset" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+          초기화
+        </button>
       </div>
     </div>
 
     <!-- Upload + Current count -->
-    <div class="no-print grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-4">
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-        <h2 class="font-bold text-lg mb-2">1) 엑셀 업로드</h2>
-        <input id="fileInput" type="file" accept=".xlsx,.xls" class="w-full block p-2 border rounded-xl" />
+        <h2 class="font-bold text-lg mb-2">엑셀 업로드</h2>
 
-        <div class="mt-3 flex gap-2 flex-wrap">
-          <button id="btnClearPeople" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
-            명단 비우기
-          </button>
-          <button id="btnNormalize" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
-            정리(중복 제거)
-          </button>
+        <div class="no-print" data-admin-only>
+          <input id="fileInput" type="file" accept=".xlsx,.xls" class="w-full block p-2 border rounded-xl" />
+          <div class="mt-3 flex gap-2 flex-wrap">
+            <button id="btnClearPeople" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+              명단 비우기
+            </button>
+            <button id="btnNormalize" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+              정리(중복 제거)
+            </button>
+          </div>
+          <div class="mt-2 text-xs text-slate-500">
+            * 뷰어는 업로드 불가. 관리자 모드에서만 업로드/수정 가능합니다.
+          </div>
+        </div>
+
+        <div class="mt-3 text-sm text-slate-600">
+          현재 이 페이지는 <b>정적 페이지(GitHub Pages)</b>라 업로드 파일을 서버에 저장하지 않습니다.<br/>
+          대신, 업로드 결과를 <b>이 기기 브라우저에 저장</b>해서 새로고침해도 유지합니다.
         </div>
       </div>
 
@@ -109,7 +144,7 @@
 
         <div id="warnBox" class="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 hidden"></div>
 
-        <div class="mt-3 no-print grid grid-cols-1 gap-2">
+        <div class="mt-3 no-print grid grid-cols-1 gap-2" data-admin-only>
           <button id="btnAssign" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-500">
             팀 배정(A/B)
           </button>
@@ -121,9 +156,9 @@
     </div>
 
     <!-- Manual add/remove -->
-    <div class="no-print grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+    <div class="no-print grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-4" data-admin-only>
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-        <h2 class="font-bold text-lg mb-2">2) 수동 추가</h2>
+        <h2 class="font-bold text-lg mb-2">수동 추가</h2>
         <textarea id="manualInput"
           class="w-full min-h-[110px] p-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-300"
           placeholder="예) 홍길동 1998 남&#10;김미송 1991 여"></textarea>
@@ -145,7 +180,7 @@
       </div>
 
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
-        <h2 class="font-bold text-lg mb-2">3) 수동 제거(운영진 제외 등)</h2>
+        <h2 class="font-bold text-lg mb-2">수동 제거(운영진 제외 등)</h2>
         <textarea id="removeInput"
           class="w-full min-h-[110px] p-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-300"
           placeholder="이름만 한 줄씩 입력&#10;예) 김미송&#10;배연우"></textarea>
@@ -164,9 +199,7 @@
 
     <!-- BIG Scoreboard -->
     <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:p-6 mb-4">
-      <div class="flex items-center justify-between flex-wrap gap-3">
-        <h2 class="font-extrabold text-xl md:text-2xl">최종 스코어(승수)</h2>
-      </div>
+      <h2 class="font-extrabold text-xl md:text-2xl">최종 스코어(승수)</h2>
 
       <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
         <div class="rounded-3xl border border-slate-200 p-5 bg-slate-50 text-center">
@@ -187,14 +220,14 @@
     </div>
 
     <!-- Teams (draggable) -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-4">
       <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
         <div class="flex items-center justify-between">
-          <h2 class="font-extrabold text-lg">A팀 명단 (드래그로 B팀 이동 가능)</h2>
+          <h2 class="font-extrabold text-lg">A팀 명단</h2>
           <span id="countA" class="text-sm text-slate-600">0명</span>
         </div>
 
-        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
             <div class="text-sm font-bold text-slate-700 mb-2">남자</div>
             <ul id="teamA_m" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
@@ -204,15 +237,19 @@
             <ul id="teamA_f" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
           </div>
         </div>
+
+        <div class="no-print mt-2 text-xs text-slate-500" data-admin-only>
+          * 관리자 모드에서만 드래그 이동/수정 가능
+        </div>
       </div>
 
       <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
         <div class="flex items-center justify-between">
-          <h2 class="font-extrabold text-lg">B팀 명단 (드래그로 A팀 이동 가능)</h2>
+          <h2 class="font-extrabold text-lg">B팀 명단</h2>
           <span id="countB" class="text-sm text-slate-600">0명</span>
         </div>
 
-        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
             <div class="text-sm font-bold text-slate-700 mb-2">남자</div>
             <ul id="teamB_m" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
@@ -229,7 +266,7 @@
     <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <h2 class="font-extrabold text-lg">경기표</h2>
-        <div class="no-print flex gap-2 flex-wrap">
+        <div class="no-print flex gap-2 flex-wrap" data-admin-only>
           <button id="btnExportJson" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">기록 저장</button>
           <button id="btnImportJson" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">기록 불러오기</button>
           <input id="jsonFile" type="file" accept="application/json" class="hidden" />
@@ -248,14 +285,9 @@
       </div>
     </div>
 
-    <!-- Mixed: full width at bottom -->
+    <!-- Mixed -->
     <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
-      <div class="flex items-center justify-between flex-wrap gap-2">
-        <h2 class="font-extrabold text-lg">혼합 복식(남은 인원 처리)</h2>
-        <div class="text-sm text-slate-600">
-          남복/여복 후 남는 인원은 <b>빈칸 없이 4명</b>으로만 경기 생성 (부족하면 1명만 랜덤 보충)
-        </div>
-      </div>
+      <h2 class="font-extrabold text-lg">혼합 복식(남은 인원 처리)</h2>
       <div class="mt-3" id="matchesX" class="flex flex-col gap-3"></div>
     </div>
 
@@ -264,9 +296,9 @@
       <summary class="no-print cursor-pointer font-extrabold text-lg select-none">이벤트 경기 (펼치기/접기)</summary>
 
       <div class="mt-3 flex items-center justify-between flex-wrap gap-2">
-        <h2 class="font-extrabold text-lg">이벤트 경기</h2>
-        <button id="btnSitminton" class="no-print px-4 py-2 rounded-2xl bg-amber-500 text-white font-extrabold hover:bg-amber-400">
-          앉은뱅이 민턴
+        <h2 class="font-extrabold text-lg">앉은뱅이 민턴</h2>
+        <button id="btnSitminton" class="no-print px-4 py-2 rounded-2xl bg-amber-500 text-white font-extrabold hover:bg-amber-400" data-admin-only>
+          랜덤 9:9 생성
         </button>
       </div>
 
@@ -283,13 +315,13 @@
 
       <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
         <div class="flex items-center justify-between flex-wrap gap-2">
-          <div class="font-extrabold">앉은뱅이 민턴 점수 (15점 선승)</div>
+          <div class="font-extrabold">점수 (15점 선승)</div>
           <div id="sitWinner" class="px-4 py-2 rounded-2xl font-extrabold text-lg bg-slate-200 text-slate-800">
             승리: —
           </div>
         </div>
 
-        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2" data-admin-only>
           <div>
             <label class="text-xs text-slate-600">A 점수</label>
             <input id="sitScoreA" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white" inputmode="numeric" placeholder="예: 15" />
@@ -306,7 +338,7 @@
     <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
       <div class="flex items-center justify-between flex-wrap gap-2">
         <h2 class="font-extrabold text-lg">선물 배분용 순서</h2>
-        <button id="btnMakeOrder" class="no-print px-4 py-2 rounded-2xl bg-fuchsia-600 text-white font-extrabold hover:bg-fuchsia-500">
+        <button id="btnMakeOrder" class="no-print px-4 py-2 rounded-2xl bg-fuchsia-600 text-white font-extrabold hover:bg-fuchsia-500" data-admin-only>
           순서 생성하기
         </button>
       </div>
@@ -329,7 +361,19 @@
     const $ = (id) => document.getElementById(id);
 
     // =========================
-    // 제목: 실행 시점의 연/월 자동 표시 + 강조 색상
+    // 관리자 비밀번호 (여기만 바꾸면 됨)
+    // =========================
+    const ADMIN_PASSWORD = "badmax!2025"; // 원하시는 비번으로 변경하세요.
+
+    // =========================
+    // localStorage 키
+    // =========================
+    const STORAGE_KEY_STATE = "badmax_state_v5";
+    const STORAGE_KEY_LOGO  = "badmax_logo_v1";
+    const STORAGE_KEY_LOCK  = "badmax_admin_unlocked_v1";
+
+    // =========================
+    // 제목 연/월 자동
     // =========================
     function setYearMonthTitle() {
       const d = new Date();
@@ -344,27 +388,10 @@
     setYearMonthTitle();
 
     // =========================
-    // 워터마크/로고
-    // =========================
-    function setLogo(src) {
-      $("brandLogo").src = src;
-      $("watermarkImg").src = src;
-      $("watermark").style.display = src ? "grid" : "none";
-    }
-    setLogo("");
-
-    $("logoInput").addEventListener("change", (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const url = URL.createObjectURL(file);
-      setLogo(url);
-    });
-
-    // =========================
     // State
     // =========================
     const state = {
-      people: [],   // {name, year, gender}
+      people: [],
       teamA: [],
       teamB: [],
       matchesM: [],
@@ -372,6 +399,147 @@
       matchesX: [],
       sit: { A: [], B: [], scoreA: "", scoreB: "" }
     };
+
+    // =========================
+    // Lock / Unlock (뷰어 / 관리자)
+    // =========================
+    function isUnlocked() {
+      return localStorage.getItem(STORAGE_KEY_LOCK) === "1";
+    }
+
+    function setUnlocked(v) {
+      localStorage.setItem(STORAGE_KEY_LOCK, v ? "1" : "0");
+      applyLockUI();
+    }
+
+    function applyLockUI() {
+      const unlocked = isUnlocked();
+      const badge = $("modeBadge");
+      const btn = $("btnUnlock");
+
+      if (unlocked) {
+        badge.textContent = "✅ 관리자 모드(편집 가능)";
+        badge.className = "text-xs font-bold px-2 py-1 rounded-xl bg-emerald-600 text-white";
+        btn.textContent = "관리자 잠금";
+      } else {
+        badge.textContent = "🔒 뷰어 모드(읽기 전용)";
+        badge.className = "locked-badge text-slate-800 text-xs font-bold px-2 py-1 rounded-xl";
+        btn.textContent = "관리자 모드";
+      }
+
+      // 관리자 전용 영역 표시/숨김 + 입력 비활성화
+      document.querySelectorAll("[data-admin-only]").forEach(el => {
+        // 화면에서 완전 숨기면 사용성 좋음
+        el.style.display = unlocked ? "" : "none";
+      });
+
+      // 로고 업로드는:
+      // - 로고가 없으면(초기 1회) 누구나 넣을 수 있게 보이되,
+      // - 로고가 있으면 관리자 모드에서만 변경 가능.
+      const hasLogo = !!localStorage.getItem(STORAGE_KEY_LOGO);
+      const logoLabel = $("logoLabel");
+      if (!hasLogo) {
+        logoLabel.classList.remove("hidden"); // 첫 세팅
+      } else {
+        logoLabel.classList.toggle("hidden", !unlocked); // 변경은 관리자만
+      }
+
+      // 점수 입력도 관리자만
+      document.querySelectorAll("input.scoreA, input.scoreB").forEach(inp => {
+        inp.disabled = !unlocked;
+        inp.classList.toggle("opacity-60", !unlocked);
+      });
+
+      // 드래그도 관리자만 (Sortable는 아래에서 unlocked에 맞게 생성)
+      setupTeamSortables();
+    }
+
+    $("btnUnlock").addEventListener("click", () => {
+      if (isUnlocked()) {
+        setUnlocked(false);
+        return;
+      }
+      const pw = prompt("관리자 비밀번호를 입력하세요.");
+      if (pw === null) return;
+      if (pw === ADMIN_PASSWORD) {
+        setUnlocked(true);
+      } else {
+        alert("비밀번호가 올바르지 않습니다.");
+      }
+    });
+
+    // =========================
+    // 로고: 1회 업로드 후 저장(새로고침에도 유지)
+    // =========================
+    function setLogoDataUrl(dataUrl) {
+      $("brandLogo").src = dataUrl || "";
+      $("watermarkImg").src = dataUrl || "";
+      $("watermark").style.display = dataUrl ? "grid" : "none";
+    }
+
+    async function fileToDataUrl(file) {
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => resolve(r.result);
+        r.onerror = reject;
+        r.readAsDataURL(file);
+      });
+    }
+
+    $("logoInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // 로고가 이미 저장돼 있고, 관리자 모드가 아니면 변경 불가
+      const hasLogo = !!localStorage.getItem(STORAGE_KEY_LOGO);
+      if (hasLogo && !isUnlocked()) {
+        alert("로고 변경은 관리자 모드에서만 가능합니다.");
+        e.target.value = "";
+        return;
+      }
+
+      const dataUrl = await fileToDataUrl(file);
+      localStorage.setItem(STORAGE_KEY_LOGO, dataUrl);
+      setLogoDataUrl(dataUrl);
+      applyLockUI();
+      e.target.value = "";
+    });
+
+    // =========================
+    // localStorage 저장/복원
+    // =========================
+    let saveTimer = null;
+    function saveStateDebounced() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try {
+          localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state));
+        } catch (e) {
+          console.error(e);
+          alert("저장 공간이 부족할 수 있습니다. (브라우저 저장소)");
+        }
+      }, 250);
+    }
+
+    function loadStateFromStorage() {
+      const raw = localStorage.getItem(STORAGE_KEY_STATE);
+      if (raw) {
+        try {
+          const data = JSON.parse(raw);
+          state.people = data.people || [];
+          state.teamA = data.teamA || [];
+          state.teamB = data.teamB || [];
+          state.matchesM = data.matchesM || [];
+          state.matchesF = data.matchesF || [];
+          state.matchesX = data.matchesX || [];
+          state.sit = data.sit || { A: [], B: [], scoreA: "", scoreB: "" };
+        } catch (e) {
+          console.warn("state parse fail", e);
+        }
+      }
+      const logo = localStorage.getItem(STORAGE_KEY_LOGO);
+      if (logo) setLogoDataUrl(logo);
+    }
 
     // =========================
     // Utils
@@ -382,23 +550,18 @@
       if (["여","여자","F","FEMALE"].includes(s)) return "여";
       return "미정";
     }
-
     function keyOf(p) { return `${p.name}|${p.year}|${p.gender}`; }
-
     function dedupePeople(list) {
-      const seen = new Set();
-      const res = [];
+      const seen = new Set(); const res = [];
       for (const p of list) {
-        const key = keyOf(p);
-        if (!seen.has(key)) { seen.add(key); res.push(p); }
+        const k = keyOf(p);
+        if (!seen.has(k)) { seen.add(k); res.push(p); }
       }
       return res;
     }
-
     function sortByElderFirst(list) {
       return [...list].sort((a,b) => (a.year - b.year) || a.name.localeCompare(b.name));
     }
-
     function countByGender(list) {
       let m=0,f=0,u=0;
       for (const p of list) {
@@ -408,7 +571,6 @@
       }
       return {m,f,u};
     }
-
     function shuffle(arr) {
       const a = [...arr];
       for (let i=a.length-1; i>0; i--) {
@@ -418,7 +580,6 @@
       return a;
     }
 
-    // 카드 테마
     const THEMES = [
       "bg-gradient-to-br from-sky-50 to-white border-sky-100",
       "bg-gradient-to-br from-emerald-50 to-white border-emerald-100",
@@ -513,8 +674,7 @@
     }
 
     // =========================
-    // Team assignment (요청 규칙)
-    // 남자 연장자부터 A/B 교차 -> 남자 끝 -> 여자 연장자부터 A/B 교차(이어감)
+    // Team assignment
     // =========================
     function assignTeamsCross() {
       const all = dedupePeople(state.people).filter(p => p.gender==="남" || p.gender==="여");
@@ -522,8 +682,7 @@
       const females = sortByElderFirst(all.filter(p=>p.gender==="여"));
 
       const A=[], B=[];
-      let toggle = true; // true => A
-
+      let toggle = true;
       for (const p of males) { (toggle ? A : B).push(p); toggle = !toggle; }
       for (const p of females) { (toggle ? A : B).push(p); toggle = !toggle; }
 
@@ -556,139 +715,87 @@
     }
 
     // =========================
-    // Match generation (중요 수정)
-    // - 남복/여복: 반드시 A 2명 + B 2명일 때만 경기 생성(4명 미만 금지)
-    // - 남은 인원(남/여 섞여도 됨): 4명 묶음으로 혼복 경기
-    //   * 1~3명 남으면: 이미 1경기 뛴 사람들 중에서 "필요 인원만" 랜덤 보충
-    //   * 보충으로 2경기 하는 사람은 혼복 보충으로만 발생. 최소화(필요 인원만큼)
-    // - 빈칸 슬롯 절대 금지
+    // Match generation (4명 미만 경기 금지 + 잔여 인원 혼복 1경기 처리)
     // =========================
     function makeStrictDoubles4(gender, themeStart=0, prefix="M") {
       const A = sortByElderFirst(state.teamA.filter(p=>p.gender===gender));
       const B = sortByElderFirst(state.teamB.filter(p=>p.gender===gender));
-
       const matches = [];
       let i=1, theme=themeStart;
 
       while (A.length >= 2 && B.length >= 2) {
-        const slots = [A.shift(), A.shift(), B.shift(), B.shift()]; // 반드시 4명
-        matches.push({
-          id: `${prefix}-${i++}`,
-          type: prefix,
-          themeIdx: (theme++ % THEMES.length),
-          slots,
-          scoreA: "",
-          scoreB: ""
-        });
+        const slots = [A.shift(), A.shift(), B.shift(), B.shift()];
+        matches.push({ id: `${prefix}-${i++}`, type: prefix, themeIdx: (theme++ % THEMES.length), slots, scoreA:"", scoreB:"" });
       }
-
       return { matches, leftoverA: A, leftoverB: B };
     }
 
     function allParticipants() { return [...state.teamA, ...state.teamB]; }
-
     function usedInMatches(matches) {
       const used = new Set();
       for (const m of matches) for (const p of (m.slots||[])) used.add(keyOf(p));
       return used;
     }
 
-    // 남은 인원들 모으기
-    function collectLeftovers(leftMale, leftFemale) {
-      // leftMale/leftFemale: {A:[],B:[]} 형태로 받는 게 아니라 이미 풀로 전달
-      return [...leftMale, ...leftFemale];
-    }
-
-    // 혼복 4명 슬롯 만들기: 가능한 A/B 균형을 우선하고, 성별은 제한하지 않음(남은 인원 처리용)
-    // 슬롯 정의: [A1, A2, B1, B2] (팀당 2명)
     function makeMixedFromRemainders(remainders, alreadyUsedSet, themeStart=0) {
       const matches = [];
-      let theme = themeStart;
-      let idx = 1;
+      let theme = themeStart, idx=1;
 
-      // 팀별 남은 인원 분리
       const remA = remainders.filter(p => state.teamA.some(x => keyOf(x)===keyOf(p)));
       const remB = remainders.filter(p => state.teamB.some(x => keyOf(x)===keyOf(p)));
 
       let poolA = shuffle(remA);
       let poolB = shuffle(remB);
 
-      // 보충 풀(이미 경기한 사람): 2경기 허용은 여기서만.
       const played = allParticipants().filter(p => alreadyUsedSet.has(keyOf(p)));
       const playedA = shuffle(played.filter(p => state.teamA.some(x => keyOf(x)===keyOf(p))));
       const playedB = shuffle(played.filter(p => state.teamB.some(x => keyOf(x)===keyOf(p))));
 
-      function take2(pool, fallbackPool) {
+      function take2(pool, fallback) {
         const res = [];
         while (res.length < 2 && pool.length) res.push(pool.shift());
-        while (res.length < 2 && fallbackPool.length) res.push(fallbackPool.shift());
+        while (res.length < 2 && fallback.length) res.push(fallback.shift());
         return res;
       }
 
-      // 1) 가능한 한 남은 인원으로 4명(각 팀 2명) 경기 만들기
       while (poolA.length >= 2 && poolB.length >= 2) {
-        const a2 = take2(poolA, []); // 이미 2명 확보됨
+        const a2 = take2(poolA, []);
         const b2 = take2(poolB, []);
-        matches.push({
-          id: `X-${idx++}`,
-          type: "X",
-          themeIdx: (theme++ % THEMES.length),
-          slots: [a2[0], a2[1], b2[0], b2[1]],
-          scoreA: "",
-          scoreB: ""
-        });
+        matches.push({ id:`X-${idx++}`, type:"X", themeIdx:(theme++ % THEMES.length), slots:[a2[0],a2[1],b2[0],b2[1]], scoreA:"", scoreB:"" });
       }
 
-      // 2) 4명이 안 되는 잔여(1~3명) 처리: 필요 인원만 보충
-      // 잔여는 팀 상관없이 존재할 수 있으나, "한 경기"를 만들기 위해 팀당 2명 구조를 맞춘다.
       const leftoverA = poolA;
       const leftoverB = poolB;
       const totalLeft = leftoverA.length + leftoverB.length;
 
       if (totalLeft > 0) {
-        // 팀별 필요한 수
         const needA = Math.max(0, 2 - leftoverA.length);
         const needB = Math.max(0, 2 - leftoverB.length);
 
         const aPicked = [...leftoverA, ...playedA.splice(0, needA)].slice(0, 2);
         const bPicked = [...leftoverB, ...playedB.splice(0, needB)].slice(0, 2);
 
-        // 만약 어떤 팀에서 2명이 절대 안 나오면(해당 팀 인원이 너무 적은 극단 상황)
-        // -> 경기 자체 생성 불가 (빈칸 금지)
         if (aPicked.length === 2 && bPicked.length === 2) {
-          matches.push({
-            id: `X-${idx++}`,
-            type: "X",
-            themeIdx: (theme++ % THEMES.length),
-            slots: [aPicked[0], aPicked[1], bPicked[0], bPicked[1]],
-            scoreA: "",
-            scoreB: ""
-          });
+          matches.push({ id:`X-${idx++}`, type:"X", themeIdx:(theme++ % THEMES.length), slots:[aPicked[0],aPicked[1],bPicked[0],bPicked[1]], scoreA:"", scoreB:"" });
         }
       }
-
       return matches;
     }
 
     function regenerateMatches() {
-      // 남복/여복은 "4명 충족" 시에만 생성
       const m = makeStrictDoubles4("남", 0, "M");
       state.matchesM = m.matches;
 
       const f = makeStrictDoubles4("여", state.matchesM.length, "F");
       state.matchesF = f.matches;
 
-      // 남은 인원(남/여) 모으기
       const leftovers = [...m.leftoverA, ...m.leftoverB, ...f.leftoverA, ...f.leftoverB];
-
-      // 이미 사용된 사람(남복/여복)
       const used = new Set([...usedInMatches(state.matchesM), ...usedInMatches(state.matchesF)]);
-
-      // 혼복 생성: 남은 인원으로 4명 구성, 부족하면 "필요 인원만" 랜덤 보충
       state.matchesX = makeMixedFromRemainders(leftovers, used, state.matchesM.length + state.matchesF.length);
 
       renderMatches();
       recomputeScoreboard();
+      saveStateDebounced();
     }
 
     // =========================
@@ -697,7 +804,6 @@
     function renderCounts() {
       state.people = dedupePeople(state.people);
       const {m,f,u} = countByGender(state.people);
-
       $("countAll").textContent = state.people.length;
       $("countM").textContent = m;
       $("countF").textContent = f;
@@ -749,9 +855,13 @@
     }
 
     function setupTeamSortables() {
+      const unlocked = isUnlocked();
       const lists = ["teamA_m","teamA_f","teamB_m","teamB_f"].map(id => document.getElementById(id));
+
       for (const ul of lists) {
         if (ul._sortable) ul._sortable.destroy();
+        if (!unlocked) continue;
+
         ul._sortable = new Sortable(ul, {
           group: "teams",
           animation: 150,
@@ -762,6 +872,7 @@
               regenerateMatches();
             } else {
               renderTeamLists();
+              saveStateDebounced();
             }
           }
         });
@@ -789,29 +900,18 @@
       state.teamB = sortByElderFirst(B.filter(p=>p.gender==="남")).concat(sortByElderFirst(B.filter(p=>p.gender==="여")));
 
       renderTeamLists();
+      saveStateDebounced();
     }
 
     // =========================
-    // Match cards (빈칸 금지로 label에서 "(빈칸)" 제거)
+    // Match cards
     // =========================
     function matchCard(m) {
       const theme = THEMES[m.themeIdx % THEMES.length];
       const code = winnerCode(m.scoreA, m.scoreB);
       const pill = winnerPillClass(code);
       const wt = winnerText(code);
-
       const label = (p) => `${p.name} (${p.year})`;
-
-      const slotsHtml = `
-        <ul class="mt-2 flex flex-col gap-2">
-          ${[0,1,2,3].map(i => `
-            <li class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
-              <div class="font-semibold truncate">${label(m.slots[i])}</div>
-              <span class="text-xs text-slate-500">${i<2 ? "A팀" : "B팀"}</span>
-            </li>
-          `).join("")}
-        </ul>
-      `;
 
       return `
         <div class="rounded-2xl border ${theme} p-3">
@@ -822,7 +922,14 @@
             </div>
           </div>
 
-          ${slotsHtml}
+          <ul class="mt-2 flex flex-col gap-2">
+            ${[0,1,2,3].map(i => `
+              <li class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
+                <div class="font-semibold truncate">${label(m.slots[i])}</div>
+                <span class="text-xs text-slate-500">${i<2 ? "A팀" : "B팀"}</span>
+              </li>
+            `).join("")}
+          </ul>
 
           <div class="mt-3 grid grid-cols-2 gap-2 items-center">
             <div>
@@ -868,6 +975,7 @@
           m.scoreA = e.target.value;
           updateWinnerUI(m);
           recomputeScoreboard();
+          saveStateDebounced();
         });
       });
       document.querySelectorAll("input.scoreB").forEach(inp => {
@@ -878,8 +986,11 @@
           m.scoreB = e.target.value;
           updateWinnerUI(m);
           recomputeScoreboard();
+          saveStateDebounced();
         });
       });
+
+      applyLockUI(); // 점수 입력 비활성 반영
     }
 
     function recomputeScoreboard() {
@@ -904,7 +1015,7 @@
     }
 
     // =========================
-    // 앉은뱅이 민턴
+    // 이벤트 경기
     // =========================
     function renderSit() {
       $("sitA").textContent = (state.sit.A.map(p => p.name).join("\n")) || "—";
@@ -925,33 +1036,28 @@
       $("sitScoreB").value = "";
       renderSit();
       recomputeScoreboard();
+      saveStateDebounced();
     }
 
     // =========================
-    // Gift order generation
+    // 선물 순서
     // =========================
     function renderOrders(winList, loseList) {
-      $("orderWin").textContent = winList.length
-        ? winList.map((n,i)=>`${i+1}. ${n}`).join("\n")
-        : "—";
-      $("orderLose").textContent = loseList.length
-        ? loseList.map((n,i)=>`${i+1}. ${n}`).join("\n")
-        : "—";
+      $("orderWin").textContent = winList.length ? winList.map((n,i)=>`${i+1}. ${n}`).join("\n") : "—";
+      $("orderLose").textContent = loseList.length ? loseList.map((n,i)=>`${i+1}. ${n}`).join("\n") : "—";
     }
 
     function makeGiftOrder() {
       const champ = $("champion").textContent.trim();
       if (champ !== "A팀" && champ !== "B팀") {
-        alert("먼저 경기 점수를 입력해서 최종 우승팀을 확정해주세요.");
+        alert("먼저 점수를 입력해서 최종 우승팀을 확정해주세요.");
         return;
       }
       const winTeam = champ === "A팀" ? state.teamA : state.teamB;
       const loseTeam = champ === "A팀" ? state.teamB : state.teamA;
 
-      const winNames = shuffle(winTeam.map(p=>p.name));
-      const loseNames = shuffle(loseTeam.map(p=>p.name));
-
-      renderOrders(winNames, loseNames);
+      renderOrders(shuffle(winTeam.map(p=>p.name)), shuffle(loseTeam.map(p=>p.name)));
+      saveStateDebounced();
     }
 
     // =========================
@@ -963,15 +1069,20 @@
       renderMatches();
       renderSit();
       recomputeScoreboard();
+      applyLockUI();
     }
 
     // =========================
-    // Events
+    // 버튼/이벤트
     // =========================
     $("btnPrint").addEventListener("click", () => window.print());
 
     $("btnReset").addEventListener("click", () => {
-      if (!confirm("정말 초기화할까요?")) return;
+      if (!confirm("이 기기 저장된 명단/경기/점수/로고까지 모두 초기화할까요?")) return;
+      localStorage.removeItem(STORAGE_KEY_STATE);
+      localStorage.removeItem(STORAGE_KEY_LOGO);
+      localStorage.removeItem(STORAGE_KEY_LOCK);
+
       state.people = [];
       state.teamA = [];
       state.teamB = [];
@@ -980,83 +1091,84 @@
       state.matchesX = [];
       state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
 
-      $("manualInput").value = "";
-      $("removeInput").value = "";
+      $("manualInput") && ($("manualInput").value = "");
+      $("removeInput") && ($("removeInput").value = "");
       $("fileInput").value = "";
-      $("addedManual").textContent = "(없음)";
-      $("failedManual").textContent = "(없음)";
-      $("removeResult").textContent = "(없음)";
-      $("sitScoreA").value = "";
-      $("sitScoreB").value = "";
+      $("addedManual") && ($("addedManual").textContent = "(없음)");
+      $("failedManual") && ($("failedManual").textContent = "(없음)");
+      $("removeResult") && ($("removeResult").textContent = "(없음)");
       $("orderWin").textContent = "—";
       $("orderLose").textContent = "—";
+
+      setLogoDataUrl("");
       renderAll();
-    });
-
-    $("btnClearPeople").addEventListener("click", () => {
-      state.people = [];
-      state.teamA = [];
-      state.teamB = [];
-      state.matchesM = [];
-      state.matchesF = [];
-      state.matchesX = [];
-      state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
-      $("addedManual").textContent = "(없음)";
-      $("failedManual").textContent = "(없음)";
-      $("removeResult").textContent = "(없음)";
-      $("orderWin").textContent = "—";
-      $("orderLose").textContent = "—";
-      renderAll();
-    });
-
-    $("btnNormalize").addEventListener("click", () => {
-      state.people = dedupePeople(state.people);
-      renderCounts();
-      alert("중복 제거 완료");
-    });
-
-    $("btnClearManual").addEventListener("click", () => {
-      $("manualInput").value = "";
-      $("addedManual").textContent = "(없음)";
-      $("failedManual").textContent = "(없음)";
-    });
-
-    $("btnClearRemove").addEventListener("click", () => {
-      $("removeInput").value = "";
-      $("removeResult").textContent = "(없음)";
+      alert("초기화 완료");
     });
 
     $("fileInput").addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+      if (!isUnlocked()) { alert("뷰어 모드에서는 업로드할 수 없습니다."); e.target.value=""; return; }
 
       try {
         const list = await loadExcelFile(file);
         state.people = dedupePeople([...state.people, ...list]);
         renderCounts();
+        saveStateDebounced();
         alert(`업로드 완료: ${list.length}명`);
       } catch (err) {
         console.error(err);
         alert("엑셀 읽기 실패: 파일 형식/시트 구조를 확인해주세요.");
+      } finally {
+        e.target.value = "";
       }
     });
 
+    $("btnClearPeople").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      state.people = [];
+      state.teamA = [];
+      state.teamB = [];
+      state.matchesM = [];
+      state.matchesF = [];
+      state.matchesX = [];
+      state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
+      $("orderWin").textContent = "—";
+      $("orderLose").textContent = "—";
+      renderAll();
+      saveStateDebounced();
+    });
+
+    $("btnNormalize").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      state.people = dedupePeople(state.people);
+      renderCounts();
+      saveStateDebounced();
+      alert("중복 제거 완료");
+    });
+
     $("btnAddManual").addEventListener("click", () => {
+      if (!isUnlocked()) return;
       const { out, failed } = parseManualLines($("manualInput").value);
       state.people = dedupePeople([...state.people, ...out]);
-
       $("addedManual").textContent = out.length ? out.map(p => `${p.name} (${p.year}) ${p.gender}`).join("\n") : "(없음)";
       $("failedManual").textContent = failed.length ? failed.join("\n") : "(없음)";
-
       renderCounts();
-      alert(`수동 추가: ${out.length}명` + (failed.length ? ` / 실패 ${failed.length}줄` : ""));
+      saveStateDebounced();
+    });
+
+    $("btnClearManual").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      $("manualInput").value = "";
+      $("addedManual").textContent = "(없음)";
+      $("failedManual").textContent = "(없음)";
     });
 
     $("btnRemoveByName").addEventListener("click", () => {
+      if (!isUnlocked()) return;
       const names = ($("removeInput").value || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
       const { removed, notFound } = removeByNames(names);
 
-      // 제외 후 경기/이벤트/순서 초기화
       state.matchesM = [];
       state.matchesF = [];
       state.matchesX = [];
@@ -1068,35 +1180,41 @@
         `제외된 인원: ${removed}명`,
         notFound.length ? `명단에 없던 이름: ${notFound.join(", ")}` : ""
       ].filter(Boolean).join("\n");
-
       $("removeResult").textContent = msg || "(없음)";
-      renderCounts();
 
+      renderCounts();
       if (state.teamA.length || state.teamB.length) {
         assignTeamsCross();
         renderTeamLists();
       }
+      saveStateDebounced();
+    });
+
+    $("btnClearRemove").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      $("removeInput").value = "";
+      $("removeResult").textContent = "(없음)";
     });
 
     $("btnAssign").addEventListener("click", () => {
+      if (!isUnlocked()) return;
       if (state.people.length < 2) { alert("명단을 먼저 넣어주세요."); return; }
       assignTeamsCross();
       state.matchesM = [];
       state.matchesF = [];
       state.matchesX = [];
-      $("orderWin").textContent = "—";
-      $("orderLose").textContent = "—";
       renderAll();
-      alert(`팀 배정 완료: A팀 ${state.teamA.length}명 / B팀 ${state.teamB.length}명`);
+      saveStateDebounced();
     });
 
     $("btnMakeMatches").addEventListener("click", () => {
+      if (!isUnlocked()) return;
       if (!state.teamA.length && !state.teamB.length) assignTeamsCross();
       regenerateMatches();
-      alert(`경기 생성 완료: 남복 ${state.matchesM.length} / 여복 ${state.matchesF.length} / 혼복 ${state.matchesX.length}`);
     });
 
     $("btnSitminton").addEventListener("click", () => {
+      if (!isUnlocked()) return;
       if (!state.teamA.length || !state.teamB.length) {
         alert("먼저 팀 배정을 해주세요.");
         return;
@@ -1105,21 +1223,26 @@
     });
 
     $("sitScoreA").addEventListener("input", (e) => {
+      if (!isUnlocked()) return;
       state.sit.scoreA = e.target.value;
       renderSit();
       recomputeScoreboard();
+      saveStateDebounced();
     });
     $("sitScoreB").addEventListener("input", (e) => {
+      if (!isUnlocked()) return;
       state.sit.scoreB = e.target.value;
       renderSit();
       recomputeScoreboard();
+      saveStateDebounced();
     });
 
-    $("btnMakeOrder").addEventListener("click", makeGiftOrder);
+    $("btnMakeOrder").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      makeGiftOrder();
+    });
 
-    // =========================
-    // Save / Load JSON
-    // =========================
+    // 저장/불러오기(관리자)
     function download(filename, text) {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(new Blob([text], {type:"application/json"}));
@@ -1128,25 +1251,17 @@
       a.click();
       a.remove();
     }
-
     $("btnExportJson").addEventListener("click", () => {
-      const payload = {
-        version: "4.0",
-        people: state.people,
-        teamA: state.teamA,
-        teamB: state.teamB,
-        matchesM: state.matchesM,
-        matchesF: state.matchesF,
-        matchesX: state.matchesX,
-        sit: state.sit,
-        exportedAt: new Date().toISOString()
-      };
+      if (!isUnlocked()) return;
+      const payload = { version:"5.0", ...state, exportedAt:new Date().toISOString() };
       download("badmax_record.json", JSON.stringify(payload, null, 2));
     });
-
-    $("btnImportJson").addEventListener("click", () => $("jsonFile").click());
-
+    $("btnImportJson").addEventListener("click", () => {
+      if (!isUnlocked()) return;
+      $("jsonFile").click();
+    });
     $("jsonFile").addEventListener("change", (e) => {
+      if (!isUnlocked()) return;
       const file = e.target.files?.[0];
       if (!file) return;
       const reader = new FileReader();
@@ -1159,30 +1274,26 @@
           state.matchesM = data.matchesM || [];
           state.matchesF = data.matchesF || [];
           state.matchesX = data.matchesX || [];
-          state.sit = data.sit || { A: [], B: [], scoreA: "", scoreB: "" };
-
-          $("addedManual").textContent = "(없음)";
-          $("failedManual").textContent = "(없음)";
-          $("removeResult").textContent = "(없음)";
-          $("orderWin").textContent = "—";
-          $("orderLose").textContent = "—";
-
+          state.sit = data.sit || { A: [], B: [], scoreA:"", scoreB:"" };
           renderAll();
-          alert("기록 불러오기 완료");
+          saveStateDebounced();
+          alert("불러오기 완료");
         } catch (err) {
           console.error(err);
-          alert("JSON 불러오기 실패: 파일이 올바른지 확인해주세요.");
+          alert("불러오기 실패: 파일 확인");
         }
       };
       reader.readAsText(file);
+      e.target.value = "";
     });
 
-    // initial
-    renderCounts();
-    renderTeamLists();
-    renderMatches();
-    renderSit();
-    recomputeScoreboard();
+    // =========================
+    // 초기 로드
+    // =========================
+    loadStateFromStorage();
+    // 첫 로고가 없으면 로고 업로드 버튼 노출(한 번만)
+    applyLockUI();
+    renderAll();
   </script>
 </body>
 </html>
