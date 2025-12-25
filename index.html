@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>배드맥스 월례대회</title>
+  <title>배드맥스 월례대회 v1</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -11,7 +11,13 @@
 
   <style>
     .locked-badge{background:rgba(15,23,42,.08);border:1px solid rgba(15,23,42,.12)}
-    .drag-ghost{opacity:.4}
+    .drag-ghost{opacity:.35}
+    .grab { cursor: grab; user-select:none; -webkit-user-select:none; }
+    .grabbing { cursor: grabbing; }
+    .empty-item{pointer-events:none; opacity:.8}
+    @media (max-width: 640px){
+      .team-item{touch-action:none;}
+    }
     @media print{
       .no-print{display:none!important}
       body{background:white!important}
@@ -29,10 +35,11 @@
       <div>
         <h1 class="text-2xl sm:text-3xl font-extrabold tracking-tight leading-tight">
           배드맥스 <span id="ymBadge" class="px-2 py-1 rounded-xl font-extrabold"></span> 월례대회
+          <span class="ml-2 text-xs text-slate-400">v1</span>
         </h1>
         <div class="mt-2 flex flex-wrap items-center gap-2">
           <span id="modeBadge" class="locked-badge text-slate-800 text-xs font-bold px-2 py-1 rounded-xl">🔒 뷰어 모드(읽기 전용)</span>
-          <span class="text-xs text-slate-500">명단/경기/점수는 이 기기 브라우저(localStorage)에 저장됩니다.</span>
+          <span class="text-xs text-slate-500">명단/팀/경기/점수는 이 기기 브라우저(localStorage)에 저장됩니다.</span>
         </div>
       </div>
 
@@ -55,7 +62,7 @@
           </div>
         </div>
         <div class="mt-3 text-sm text-slate-600">
-          엑셀 업로드는 “명단 데이터”로만 반영됩니다. 파일 자체는 저장되지 않습니다.
+          엑셀은 <b>이름 / 출생연도(2자리 또는 4자리) / 성별</b> 형태면 자동 인식합니다.
         </div>
       </div>
 
@@ -76,8 +83,6 @@
             <div id="countF" class="text-2xl font-bold mt-1">0</div>
           </div>
         </div>
-
-        <div id="warnBox" class="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 hidden"></div>
 
         <div class="mt-3 no-print grid grid-cols-1 gap-2" data-admin-only>
           <button id="btnAssign" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-500">팀 배정(A/B)</button>
@@ -114,7 +119,7 @@
       <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
         <h2 class="font-bold text-lg mb-2">수동 제거(운영진 제외 등)</h2>
         <textarea id="removeInput" class="w-full min-h-[110px] p-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-300"
-          placeholder="이름만 한 줄씩 입력&#10;예) 홍길동&#10;홍길순"></textarea>
+          placeholder="이름만 한 줄씩 입력&#10;예) 김미송&#10;배연우"></textarea>
 
         <div class="mt-3 flex gap-2 flex-wrap">
           <button id="btnRemoveByName" class="px-4 py-2 rounded-xl bg-rose-600 text-white font-semibold hover:bg-rose-500">명단에서 제외</button>
@@ -204,7 +209,7 @@
       <!-- Mixed at bottom -->
       <div class="mt-6">
         <h3 class="font-extrabold text-slate-900 mb-2">혼합 복식(맨 아래 1경기)</h3>
-        <div id="mixedBox" class="rounded-2xl border border-slate-200 bg-gradient-to-br from-amber-50 to-white p-3">
+        <div class="rounded-2xl border border-slate-200 bg-gradient-to-br from-amber-50 to-white p-3">
           <div class="flex items-start justify-between gap-2">
             <div class="font-extrabold">혼복 M-1</div>
             <div id="winbox-MIX-1" class="px-4 py-2 rounded-2xl font-extrabold text-lg bg-slate-200 text-slate-800">
@@ -296,92 +301,25 @@
   </div>
 
 <script>
-const $ = (id) => document.getElementById(id);
+/* ===================== CONFIG ===================== */
 const ADMIN_PASSWORD = "13579";
-const STORAGE_KEY_STATE = "badmax_state_full_v1";
-const STORAGE_KEY_LOCK  = "badmax_admin_unlocked_v1";
+const STORAGE_KEY_STATE = "badmax_state_v1_fixed";
+const STORAGE_KEY_LOCK  = "badmax_admin_unlocked_v1_fixed";
+
+/* ===================== HELPERS ===================== */
+const $ = (id) => document.getElementById(id);
 
 function setYearMonthTitle(){
   const d=new Date(); const y=d.getFullYear(); const m=d.getMonth()+1;
   $("ymBadge").textContent=`${y}년 ${m}월`;
   $("ymBadge").className="px-2 py-1 rounded-xl font-extrabold bg-indigo-600 text-white";
-  document.title=`배드맥스 ${y}년 ${m}월 월례대회`;
+  document.title=`배드맥스 ${y}년 ${m}월 월례대회 v1`;
 }
 setYearMonthTitle();
-
-const state = {
-  people: [],
-  teamA: [],
-  teamB: [],
-  matchesM: [],
-  matchesF: [],
-  mixed: { slots: null, scoreA:"", scoreB:"" }, // slots: {Am,Af,Bm,Bf}
-  event: { A:[], B:[], scoreA:"", scoreB:"" },
-  gift: { win:[], lose:[] }
-};
 
 function isUnlocked(){ return localStorage.getItem(STORAGE_KEY_LOCK)==="1"; }
 function setUnlocked(v){ localStorage.setItem(STORAGE_KEY_LOCK, v?"1":"0"); applyLockUI(); }
 
-$("btnUnlock").addEventListener("click", ()=>{
-  if(isUnlocked()){ setUnlocked(false); return; }
-  const pw = prompt("관리자 비밀번호를 입력하세요.");
-  if(pw===null) return;
-  if(pw===ADMIN_PASSWORD) setUnlocked(true);
-  else alert("비밀번호가 올바르지 않습니다.");
-});
-
-let saveTimer=null;
-function saveStateDebounced(){
-  clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state)), 200);
-}
-function loadStateFromStorage(){
-  const raw=localStorage.getItem(STORAGE_KEY_STATE);
-  if(!raw) return;
-  try{
-    const data=JSON.parse(raw);
-    Object.assign(state, data);
-    state.people = state.people || [];
-    state.teamA = state.teamA || [];
-    state.teamB = state.teamB || [];
-    state.matchesM = state.matchesM || [];
-    state.matchesF = state.matchesF || [];
-    state.mixed = state.mixed || {slots:null,scoreA:"",scoreB:""};
-    state.event = state.event || {A:[],B:[],scoreA:"",scoreB:""};
-    state.gift = state.gift || {win:[],lose:[]};
-  }catch(e){}
-}
-
-function applyLockUI(){
-  const unlocked=isUnlocked();
-  const badge=$("modeBadge");
-  const btn=$("btnUnlock");
-
-  if(unlocked){
-    badge.textContent="✅ 관리자 모드(편집 가능)";
-    badge.className="text-xs font-bold px-2 py-1 rounded-xl bg-emerald-600 text-white";
-    btn.textContent="관리자 잠금";
-  }else{
-    badge.textContent="🔒 뷰어 모드(읽기 전용)";
-    badge.className="locked-badge text-slate-800 text-xs font-bold px-2 py-1 rounded-xl";
-    btn.textContent="관리자 모드";
-  }
-
-  document.querySelectorAll("[data-admin-only]").forEach(el=>{
-    el.style.display = unlocked ? "" : "none";
-  });
-
-  setupTeamSortables();
-  bindScoreInputsDisabled();
-}
-
-function normGender(g){
-  const s=(g??"").toString().trim().toUpperCase();
-  if(["남","남자","M","MALE"].includes(s)) return "남";
-  if(["여","여자","F","FEMALE"].includes(s)) return "여";
-  return "미정";
-}
 function keyOf(p){ return `${p.name}|${p.year}|${p.gender}`; }
 function dedupePeople(list){
   const seen=new Set(); const res=[];
@@ -394,15 +332,6 @@ function dedupePeople(list){
 function sortByElderFirst(list){
   return [...list].sort((a,b)=>(a.year-b.year)||a.name.localeCompare(b.name));
 }
-function countByGender(list){
-  let m=0,f=0,u=0;
-  for(const p of list){
-    if(p.gender==="남") m++;
-    else if(p.gender==="여") f++;
-    else u++;
-  }
-  return {m,f,u};
-}
 function shuffle(arr){
   const a=[...arr];
   for(let i=a.length-1;i>0;i--){
@@ -411,6 +340,43 @@ function shuffle(arr){
   }
   return a;
 }
+function normGender(g){
+  const s=(g??"").toString().trim().toUpperCase();
+  if(["남","남자","M","MALE"].includes(s)) return "남";
+  if(["여","여자","F","FEMALE"].includes(s)) return "여";
+  return "미정";
+}
+
+// ✅ 2자리 연도 자동 변환 (00~20 => 2000+, 그 외 => 1900+)
+function normalizeYear(v){
+  if(v===null||v===undefined) return NaN;
+  // Excel 날짜 시리얼 대응
+  if(typeof v==="number" && v>30000 && v<60000){
+    const dt = XLSX.SSF.parse_date_code(v);
+    if(dt && dt.y) return dt.y;
+  }
+  const s = (""+v).trim();
+  if(!s) return NaN;
+
+  // 4자리
+  if(/^\d{4}$/.test(s)){
+    const y=parseInt(s,10);
+    return (y>=1900&&y<=2099)?y:NaN;
+  }
+  // 2자리
+  if(/^\d{2}$/.test(s)){
+    const yy=parseInt(s,10);
+    return (yy<=20) ? (2000+yy) : (1900+yy);
+  }
+  // 숫자(예: 98, 7)
+  const n=parseInt(s,10);
+  if(Number.isFinite(n)){
+    if(n<100) return (n<=20)?(2000+n):(1900+n);
+    if(n>=1900&&n<=2099) return n;
+  }
+  return NaN;
+}
+
 function winnerCode(scoreA,scoreB){
   const a=parseInt(scoreA,10), b=parseInt(scoreB,10);
   if(!Number.isFinite(a)||!Number.isFinite(b)) return "";
@@ -432,200 +398,89 @@ function winnerPillClass(code){
 }
 function label(p){ return `${p.name} (${p.year})`; }
 
-// Excel
-function guessColumn(headers,cands){
-  const lower=headers.map(h=>(h??"").toString().trim().toLowerCase());
-  for(const cand of cands){
-    const idx=lower.findIndex(h=>h.includes(cand));
-    if(idx!==-1) return idx;
-  }
-  return -1;
-}
-async function loadExcelFile(file){
-  const buf=await file.arrayBuffer();
-  const wb=XLSX.read(new Uint8Array(buf), {type:"array"});
-  const ws=wb.Sheets[wb.SheetNames[0]];
-  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
-  if(!rows.length) return [];
-  const headers=rows[0].map(x=>x.toString());
-  const idxName=guessColumn(headers,["이름","성명","name"]);
-  const idxYear=guessColumn(headers,["출생연도","출생","year","birth","년도"]);
-  const idxGender=guessColumn(headers,["성별","남여","gender","sex"]);
-  const nI=idxName!==-1?idxName:0;
-  const yI=idxYear!==-1?idxYear:1;
-  const gI=idxGender!==-1?idxGender:2;
+/* ===================== STATE ===================== */
+const state = {
+  people: [],
+  teamA: [],
+  teamB: [],
+  matchesM: [],
+  matchesF: [],
+  mixed: { slots: null, scoreA:"", scoreB:"", note:"" },
+  event: { A:[], B:[], scoreA:"", scoreB:"" },
+  gift: { win:[], lose:[] }
+};
 
-  const out=[];
-  for(let r=1;r<rows.length;r++){
-    const row=rows[r];
-    const name=(row[nI]??"").toString().trim();
-    if(!name) continue;
-    const year=parseInt((row[yI]??"").toString().trim(),10);
-    const gender=normGender((row[gI]??"").toString().trim());
-    out.push({name,year,gender});
-  }
-  return out;
+let saveTimer=null;
+function saveStateDebounced(){
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>localStorage.setItem(STORAGE_KEY_STATE, JSON.stringify(state)), 150);
 }
-
-// Manual add/remove
-function parseManualLines(text){
-  const lines=(text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-  const out=[]; const failed=[];
-  const re=/^(.+?)\s+(\d{4})\s+(남|여|남자|여자|M|F)\s*$/i;
-  for(const line of lines){
-    const m=line.match(re);
-    if(!m){ failed.push(line); continue; }
-    const name=m[1].trim();
-    const year=parseInt(m[2],10);
-    const gender=normGender(m[3]);
-    if(!(year>=1900&&year<=2099)){ failed.push(line+"  (연도 범위 오류)"); continue; }
-    if(gender==="미정"){ failed.push(line+"  (성별 인식 실패)"); continue; }
-    out.push({name,year,gender});
-  }
-  return {out,failed};
-}
-function removeByNames(names){
-  const set=new Set(names.map(n=>n.trim()).filter(Boolean));
-  if(!set.size) return {removed:0, notFound:[]};
-  const before=state.people.length;
-  const existed=new Set(state.people.map(p=>p.name));
-  state.people=state.people.filter(p=>!set.has(p.name));
-  state.teamA=state.teamA.filter(p=>!set.has(p.name));
-  state.teamB=state.teamB.filter(p=>!set.has(p.name));
-  const removed=before-state.people.length;
-  const notFound=[...set].filter(n=>!existed.has(n));
-  return {removed, notFound};
+function loadStateFromStorage(){
+  const raw=localStorage.getItem(STORAGE_KEY_STATE);
+  if(!raw) return;
+  try{
+    const data=JSON.parse(raw);
+    Object.assign(state, data);
+    state.people = state.people || [];
+    state.teamA  = state.teamA  || [];
+    state.teamB  = state.teamB  || [];
+    state.matchesM = state.matchesM || [];
+    state.matchesF = state.matchesF || [];
+    state.mixed = state.mixed || {slots:null,scoreA:"",scoreB:"",note:""};
+    state.event = state.event || {A:[],B:[],scoreA:"",scoreB:""};
+    state.gift  = state.gift  || {win:[],lose:[]};
+  }catch(e){}
 }
 
-// Team assign: 남자 교차 -> 여자 교차
-function assignTeamsCross(){
-  const all=dedupePeople(state.people).filter(p=>p.gender==="남"||p.gender==="여");
-  const males=sortByElderFirst(all.filter(p=>p.gender==="남"));
-  const females=sortByElderFirst(all.filter(p=>p.gender==="여"));
-  const A=[],B=[];
-  let t=true;
-  for(const p of males){ (t?A:B).push(p); t=!t; }
-  for(const p of females){ (t?A:B).push(p); t=!t; }
-  state.teamA=A; state.teamB=B;
-}
+/* ===================== UI LOCK ===================== */
+function applyLockUI(){
+  const unlocked=isUnlocked();
+  const badge=$("modeBadge");
+  const btn=$("btnUnlock");
 
-// Make doubles: 4인(A2 vs B2)
-function makeStrictDoubles4(gender, prefix){
-  const A=sortByElderFirst(state.teamA.filter(p=>p.gender===gender));
-  const B=sortByElderFirst(state.teamB.filter(p=>p.gender===gender));
-  const matches=[];
-  let i=1;
-  while(A.length>=2 && B.length>=2){
-    const slots=[A.shift(),A.shift(),B.shift(),B.shift()];
-    matches.push({ id:`${prefix}-${i++}`, slots, scoreA:"", scoreB:"" });
-  }
-  // leftovers for display
-  return {matches, leftA:A, leftB:B};
-}
-
-function usedSetFromMatches(){
-  const used=new Set();
-  for(const m of [...state.matchesM,...state.matchesF]){
-    for(const p of m.slots) used.add(keyOf(p));
-  }
-  return used;
-}
-
-// Mixed: create ONE match based on leftovers + closest age
-function pickClosestByYear(pool, targetYear){
-  if(!pool.length) return null;
-  let best=pool[0], bestDiff=Math.abs(pool[0].year-targetYear);
-  for(const p of pool){
-    const d=Math.abs(p.year-targetYear);
-    if(d<bestDiff){ best=p; bestDiff=d; }
-  }
-  return best;
-}
-function removeFromPool(pool, picked){
-  const k=keyOf(picked);
-  const idx=pool.findIndex(p=>keyOf(p)===k);
-  if(idx!==-1) pool.splice(idx,1);
-}
-function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
-  // candidates from leftovers first
-  const A_m_left=shuffle(leftAm);
-  const A_f_left=shuffle(leftAf);
-  const B_m_left=shuffle(leftBm);
-  const B_f_left=shuffle(leftBf);
-
-  // helper: pick same team other gender if missing
-  function pickFromTeam(teamArr, gender, preferPlayed=true){
-    const all=teamArr.filter(p=>p.gender===gender);
-    if(!all.length) return null;
-    const played = shuffle(all.filter(p=>used.has(keyOf(p))));
-    const notPlayed = shuffle(all.filter(p=>!used.has(keyOf(p))));
-    if(preferPlayed) return played[0] || notPlayed[0] || null;
-    return notPlayed[0] || played[0] || null;
+  if(unlocked){
+    badge.textContent="✅ 관리자 모드(편집 가능)";
+    badge.className="text-xs font-bold px-2 py-1 rounded-xl bg-emerald-600 text-white";
+    btn.textContent="관리자 잠금";
+  }else{
+    badge.textContent="🔒 뷰어 모드(읽기 전용)";
+    badge.className="locked-badge text-slate-800 text-xs font-bold px-2 py-1 rounded-xl";
+    btn.textContent="관리자 모드";
   }
 
-  // Step 1) ensure A has (m,f) using leftovers first
-  let Am = A_m_left.shift() || null;
-  let Af = A_f_left.shift() || null;
+  document.querySelectorAll("[data-admin-only]").forEach(el=>{
+    el.style.display = unlocked ? "" : "none";
+  });
 
-  // If A has one leftover only, attach other gender from same team (prefer already played)
-  if(Am && !Af) Af = pickFromTeam(state.teamA,"여",true);
-  if(Af && !Am) Am = pickFromTeam(state.teamA,"남",true);
-
-  // If still missing -> cannot form A side
-  if(!(Am && Af)) return {slots:null, note:"A팀에서 혼복(남+여) 구성이 불가능합니다."};
-
-  // Step 2) Build B side similar, but choose closest age to A’s players
-  // Prefer leftovers first, but closest age within leftovers; if none -> from teamB (prefer played)
-  let Bm = null;
-  let Bf = null;
-
-  // For B male: choose closest to Am.year from leftover males if exists
-  if(B_m_left.length){
-    Bm = pickClosestByYear(B_m_left, Am.year);
-    removeFromPool(B_m_left, Bm);
-  } else {
-    Bm = pickFromTeam(state.teamB,"남",true);
-  }
-
-  // For B female: closest to Af.year
-  if(B_f_left.length){
-    Bf = pickClosestByYear(B_f_left, Af.year);
-    removeFromPool(B_f_left, Bf);
-  } else {
-    Bf = pickFromTeam(state.teamB,"여",true);
-  }
-
-  if(!(Bm && Bf)) return {slots:null, note:"B팀에서 혼복(남+여) 구성이 불가능합니다."};
-
-  return {slots:{Am,Af,Bm,Bf}, note:"남는 인원을 우선 사용하고, 부족하면 같은 팀 인원으로 채웠습니다(상대는 비슷한 연령대로 매칭)."};
+  setupTeamSortables();
+  bindMixedScore();
+  bindEventScore();
+  bindDoublesScoreInputs();
 }
 
-// Render counts/teams
+/* ===================== COUNTS ===================== */
 function renderCounts(){
   state.people=dedupePeople(state.people);
-  const {m,f,u}=countByGender(state.people);
+  const males=state.people.filter(p=>p.gender==="남").length;
+  const females=state.people.filter(p=>p.gender==="여").length;
   $("countAll").textContent=state.people.length;
-  $("countM").textContent=m;
-  $("countF").textContent=f;
-
-  const warn=[];
-  if(u>0) warn.push(`성별 미정 ${u}명(정리 필요)`);
-  if(state.people.length===0) warn.push("명단이 비어있습니다.");
-  $("warnBox").textContent=warn.join(" / ");
-  $("warnBox").classList.toggle("hidden", warn.length===0);
+  $("countM").textContent=males;
+  $("countF").textContent=females;
 }
 
+/* ===================== TEAM LIST UI ===================== */
 function emptyLi(){
-  return `<li class="text-sm text-slate-500 px-3 py-2 rounded-xl border border-dashed border-slate-200 bg-white">(비어있음)</li>`;
+  return `<li class="empty-item text-sm text-slate-500 px-3 py-2 rounded-xl border border-dashed border-slate-200 bg-white">(비어있음)</li>`;
 }
 function teamLi(p, idx){
   const badge=p.gender==="남"
     ? "bg-sky-50 text-sky-700 border-sky-200"
     : "bg-pink-50 text-pink-700 border-pink-200";
+
   return `
-    <li class="team-item flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white cursor-grab active:cursor-grabbing"
+    <li class="team-item flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white grab"
         data-name="${p.name}" data-year="${p.year}" data-gender="${p.gender}">
-      <div class="min-w-0">
+      <div class="min-w-0 flex items-center gap-2">
         <div class="font-semibold truncate">
           <span class="text-slate-500 mr-2">${idx}.</span>${p.name}
           <span class="text-slate-400">(${p.year})</span>
@@ -652,30 +507,7 @@ function renderTeamLists(){
   setupTeamSortables();
 }
 
-function setupTeamSortables(){
-  const unlocked=isUnlocked();
-  const lists=["teamA_m","teamA_f","teamB_m","teamB_f"].map(id=>document.getElementById(id));
-  for(const ul of lists){
-    if(ul._sortableTeams) ul._sortableTeams.destroy();
-    if(!unlocked) continue;
-
-    ul._sortableTeams = new Sortable(ul,{
-      group:"teamsMove",
-      animation:150,
-      ghostClass:"drag-ghost",
-      onEnd: ()=>{
-        syncTeamsFromDOM();
-        // 팀 바꾸면 경기/혼복/이벤트/선물은 다시 생성 권장 -> 안전하게 비움
-        state.matchesM=[]; state.matchesF=[];
-        state.mixed={slots:null,scoreA:"",scoreB:""};
-        state.event={A:[],B:[],scoreA:"",scoreB:""};
-        state.gift={win:[],lose:[]};
-        renderAll();
-        saveStateDebounced();
-      }
-    });
-  }
-}
+/* ===================== DRAG & SYNC + AUTO REGENERATE ===================== */
 function syncTeamsFromDOM(){
   const readList=(id)=>{
     const ul=document.getElementById(id);
@@ -691,11 +523,204 @@ function syncTeamsFromDOM(){
   };
   const A=[...readList("teamA_m"),...readList("teamA_f")];
   const B=[...readList("teamB_m"),...readList("teamB_f")];
+
   state.teamA = sortByElderFirst(A.filter(p=>p.gender==="남")).concat(sortByElderFirst(A.filter(p=>p.gender==="여")));
   state.teamB = sortByElderFirst(B.filter(p=>p.gender==="남")).concat(sortByElderFirst(B.filter(p=>p.gender==="여")));
 }
 
-// Match cards
+function regenerateScheduleAfterTeamChange(){
+  if(!state.teamA?.length || !state.teamB?.length){
+    state.matchesM=[]; state.matchesF=[];
+    state.mixed={slots:null,scoreA:"",scoreB:"",note:"팀 배정 후 경기 생성이 가능합니다."};
+    renderMatches(); renderMixed(); recomputeScoreboard();
+    return;
+  }
+  makeMatchesAndMixed(true);
+}
+
+function setupTeamSortables(){
+  const unlocked=isUnlocked();
+  const ids=["teamA_m","teamA_f","teamB_m","teamB_f"];
+
+  ids.forEach(id=>{
+    const ul=$(id);
+    if(ul._sortableTeams){ ul._sortableTeams.destroy(); ul._sortableTeams=null; }
+    if(!unlocked) return;
+
+    ul._sortableTeams = new Sortable(ul,{
+      group:"teamsMove",
+      animation:150,
+      ghostClass:"drag-ghost",
+      draggable: ".team-item",
+      filter: ".empty-item",
+      preventOnFilter: false,
+
+      onStart: (evt)=> evt.item.classList.add("grabbing"),
+
+      onAdd: ()=>{
+        syncTeamsFromDOM();
+        regenerateScheduleAfterTeamChange();
+        saveStateDebounced();
+        renderAll();
+      },
+      onRemove: ()=>{
+        syncTeamsFromDOM();
+        regenerateScheduleAfterTeamChange();
+        saveStateDebounced();
+        renderAll();
+      },
+      onEnd: (evt)=>{
+        evt.item.classList.remove("grabbing");
+        syncTeamsFromDOM();
+        regenerateScheduleAfterTeamChange();
+
+        state.event = {A:[],B:[],scoreA:"",scoreB:""};
+        state.gift  = {win:[],lose:[]};
+        $("giftNote").textContent="팀 변경으로 선물 순서를 다시 생성하세요.";
+
+        saveStateDebounced();
+        renderAll();
+      }
+    });
+  });
+}
+
+/* ===================== TEAM ASSIGN (male then female zigzag) ===================== */
+function assignTeamsCross(){
+  const all=dedupePeople(state.people).filter(p=>p.gender==="남"||p.gender==="여");
+  const males=sortByElderFirst(all.filter(p=>p.gender==="남"));
+  const females=sortByElderFirst(all.filter(p=>p.gender==="여"));
+
+  const A=[],B=[];
+  let t=true; // true => A
+  for(const p of males){ (t?A:B).push(p); t=!t; }
+  for(const p of females){ (t?A:B).push(p); t=!t; }
+
+  state.teamA=A; state.teamB=B;
+}
+
+/* ===================== MATCH BUILDERS ===================== */
+function makeStrictDoubles4(gender, prefix){
+  const A=sortByElderFirst(state.teamA.filter(p=>p.gender===gender));
+  const B=sortByElderFirst(state.teamB.filter(p=>p.gender===gender));
+  const matches=[];
+  let i=1;
+  while(A.length>=2 && B.length>=2){
+    const slots=[A.shift(),A.shift(),B.shift(),B.shift()];
+    matches.push({ id:`${prefix}-${i++}`, slots, scoreA:"", scoreB:"" });
+  }
+  return {matches, leftA:A, leftB:B};
+}
+function usedSetFromMatches(){
+  const used=new Set();
+  for(const m of [...state.matchesM,...state.matchesF]){
+    for(const p of m.slots) used.add(keyOf(p));
+  }
+  return used;
+}
+function removeFromPool(pool, picked){
+  const k=keyOf(picked);
+  const idx=pool.findIndex(p=>keyOf(p)===k);
+  if(idx!==-1) pool.splice(idx,1);
+}
+
+/* =========================================================
+   ✅ 혼합복식 "나이대 비슷하게" 개선 로직 (여기만 변경됨)
+   - A팀 남/여 1명씩 확정
+   - B팀은 남×여 조합 후보 중에서
+     (A팀 평균출생연도)와 (B팀 평균출생연도) 차이가 최소인 조합 선택
+   - 남는 인원 우선 사용, 부족하면 같은 팀에서(이미 뛴 사람 우선) 채움
+========================================================= */
+function buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used){
+  const A_m_left=shuffle(leftAm);
+  const A_f_left=shuffle(leftAf);
+
+  function pickFromTeam(teamArr, gender){
+    const all=teamArr.filter(p=>p.gender===gender);
+    if(!all.length) return null;
+    const played = shuffle(all.filter(p=>used.has(keyOf(p))));
+    const notPlayed = shuffle(all.filter(p=>!used.has(keyOf(p))));
+    return played[0] || notPlayed[0] || null;
+  }
+
+  // 1) A팀 남/여 구성(남는 인원 우선)
+  let Am = A_m_left.shift() || null;
+  let Af = A_f_left.shift() || null;
+
+  if(Am && !Af) Af = pickFromTeam(state.teamA,"여");
+  if(Af && !Am) Am = pickFromTeam(state.teamA,"남");
+
+  if(!(Am && Af)) return {slots:null, note:"A팀에서 혼복(남+여) 구성이 불가능합니다."};
+
+  const targetAvg = (Am.year + Af.year) / 2;
+
+  // 2) B팀 후보 풀(남는 인원 우선, 없으면 팀 전체에서 보충)
+  let BmPool = shuffle([...leftBm]);
+  let BfPool = shuffle([...leftBf]);
+
+  if(BmPool.length===0){
+    const extra = state.teamB.filter(p=>p.gender==="남");
+    BmPool = shuffle(extra);
+  }
+  if(BfPool.length===0){
+    const extra = state.teamB.filter(p=>p.gender==="여");
+    BfPool = shuffle(extra);
+  }
+
+  // B팀에 남/여 자체가 없으면 불가
+  if(!BmPool.length || !BfPool.length){
+    return {slots:null, note:"B팀에서 혼복(남+여) 구성이 불가능합니다."};
+  }
+
+  // 3) "남×여 조합" 중 평균 출생연도가 targetAvg에 가장 가까운 조합 선택
+  //    (풀 크기 커져도 최대 60명이라 충분히 빠름. 그래도 안전하게 상한을 둠)
+  const maxM = Math.min(BmPool.length, 12);
+  const maxF = Math.min(BfPool.length, 12);
+  let best=null;
+  let bestDiff=Infinity;
+
+  for(let i=0;i<maxM;i++){
+    for(let j=0;j<maxF;j++){
+      const bm=BmPool[i], bf=BfPool[j];
+      const avg = (bm.year + bf.year) / 2;
+      const diff = Math.abs(avg - targetAvg);
+
+      // 2게임 최소화: diff가 같으면 "이미 뛴 사람" 조합을 더 우선(혼복 채우기용)
+      const playedScore = (used.has(keyOf(bm))?1:0) + (used.has(keyOf(bf))?1:0);
+
+      if(diff < bestDiff){
+        bestDiff = diff;
+        best = {bm,bf,playedScore};
+      }else if(diff === bestDiff && best){
+        if(playedScore > best.playedScore){
+          best = {bm,bf,playedScore};
+        }
+      }
+    }
+  }
+
+  const Bm = best?.bm || BmPool[0];
+  const Bf = best?.bf || BfPool[0];
+
+  // left 풀에서 제거(있을 때만)
+  removeFromPool(leftBm, Bm);
+  removeFromPool(leftBf, Bf);
+
+  return {
+    slots:{Am,Af,Bm,Bf},
+    note:"혼복은 양 팀 평균 출생연도가 가장 비슷한 조합으로 매칭했습니다."
+  };
+}
+/* ===================== (혼복 개선 끝) ===================== */
+
+function renderLeftovers(leftMale, leftFemale){
+  const lm = $("leftM");
+  const lf = $("leftF");
+  if(lm) lm.textContent = leftMale || "";
+  if(lf) lf.textContent = leftFemale || "";
+}
+
+/* ===================== MATCH UI ===================== */
 const THEMES=[
   "bg-gradient-to-br from-sky-50 to-white border-sky-100",
   "bg-gradient-to-br from-emerald-50 to-white border-emerald-100",
@@ -706,6 +731,7 @@ const THEMES=[
   "bg-gradient-to-br from-cyan-50 to-white border-cyan-100",
   "bg-gradient-to-br from-lime-50 to-white border-lime-100",
 ];
+
 function matchCard(m, idx){
   const theme=THEMES[idx % THEMES.length];
   const code=winnerCode(m.scoreA,m.scoreB);
@@ -757,41 +783,40 @@ function renderMatches(){
   $("matchesF").innerHTML=state.matchesF.map((m,i)=>matchCard(m,i+state.matchesM.length)).join("");
   bindDoublesScoreInputs();
 }
-
 function bindDoublesScoreInputs(){
   const unlocked=isUnlocked();
   document.querySelectorAll("input.scoreA").forEach(inp=>{
     inp.disabled=!unlocked;
     inp.classList.toggle("opacity-60", !unlocked);
-    inp.addEventListener("input",(e)=>{
+    inp.oninput = (e)=>{
       const m=findMatchById(e.target.dataset.matchid);
       if(!m) return;
       m.scoreA=e.target.value;
       updateWinnerUI(m);
       recomputeScoreboard();
       saveStateDebounced();
-    });
+    };
   });
   document.querySelectorAll("input.scoreB").forEach(inp=>{
     inp.disabled=!unlocked;
     inp.classList.toggle("opacity-60", !unlocked);
-    inp.addEventListener("input",(e)=>{
+    inp.oninput = (e)=>{
       const m=findMatchById(e.target.dataset.matchid);
       if(!m) return;
       m.scoreB=e.target.value;
       updateWinnerUI(m);
       recomputeScoreboard();
       saveStateDebounced();
-    });
+    };
   });
 }
 
-// Mixed render + score
+/* ===================== MIXED UI ===================== */
 function renderMixed(){
   const s=state.mixed.slots;
   if(!s){
     $("mixedPlayers").innerHTML = `<div class="text-sm text-slate-600">혼합복식을 만들 수 없거나 필요하지 않습니다.</div>`;
-    $("mixedNote").textContent = "남는 인원이 없거나(모두 복식으로 소진), 팀 성비가 부족해 혼복(남+여 vs 남+여)을 구성할 수 없습니다.";
+    $("mixedNote").textContent = state.mixed.note || "남는 인원이 없거나 팀 성비가 부족합니다.";
     $("mixScoreA").value = "";
     $("mixScoreB").value = "";
     setMixedWinnerPill("", "");
@@ -849,45 +874,7 @@ function bindMixedScore(){
   };
 }
 
-// Leftover display
-function renderLeftovers(leftMale, leftFemale){
-  $("leftM").textContent = leftMale ? leftMale : "";
-  $("leftF").textContent = leftFemale ? leftFemale : "";
-}
-
-// Scoreboard (includes mixed + event)
-function recomputeScoreboard(){
-  let winsA=0,winsB=0;
-
-  for(const m of [...state.matchesM,...state.matchesF]){
-    const code=winnerCode(m.scoreA,m.scoreB);
-    if(code==="A") winsA++;
-    if(code==="B") winsB++;
-  }
-  const mixCode = winnerCode(state.mixed?.scoreA, state.mixed?.scoreB);
-  if(mixCode==="A") winsA++;
-  if(mixCode==="B") winsB++;
-
-  const evCode = winnerCode(state.event?.scoreA, state.event?.scoreB);
-  if(evCode==="A") winsA++;
-  if(evCode==="B") winsB++;
-
-  $("winsA").textContent=winsA;
-  $("winsB").textContent=winsB;
-
-  let champ="—";
-  if(winsA>winsB) champ="A팀";
-  else if(winsB>winsA) champ="B팀";
-  $("champion").textContent=champ;
-}
-
-// Disable binding for inputs on lock change
-function bindScoreInputsDisabled(){
-  bindMixedScore();
-  bindEventScore();
-}
-
-// Event game
+/* ===================== EVENT ===================== */
 function renderEvent(){
   const A = state.event.A || [];
   const B = state.event.B || [];
@@ -926,13 +913,16 @@ function bindEventScore(){
   };
 }
 function pickEventPlayers(){
-  const A=shuffle(state.teamA.filter(p=>p.gender==="남"||p.gender==="여")).slice(0,9);
-  const B=shuffle(state.teamB.filter(p=>p.gender==="남"||p.gender==="여")).slice(0,9);
-  state.event.A=A; state.event.B=B;
-  // 점수는 유지(원하면 여기서 초기화 가능)
+  if(!state.teamA.length || !state.teamB.length){
+    alert("먼저 팀 배정(A/B)을 해주세요.");
+    return false;
+  }
+  state.event.A = shuffle(state.teamA).slice(0,9);
+  state.event.B = shuffle(state.teamB).slice(0,9);
+  return true;
 }
 
-// Gift order
+/* ===================== GIFT ===================== */
 function renderGift(){
   $("giftWin").innerHTML = (state.gift.win||[]).length ? state.gift.win.map(p=>`<li>${label(p)} (${p.gender})</li>`).join("") : `<li class="text-slate-500">미생성</li>`;
   $("giftLose").innerHTML = (state.gift.lose||[]).length ? state.gift.lose.map(p=>`<li>${label(p)} (${p.gender})</li>`).join("") : `<li class="text-slate-500">미생성</li>`;
@@ -953,7 +943,150 @@ function makeGiftOrder(){
   renderGift();
 }
 
-// Main render
+/* ===================== SCOREBOARD ===================== */
+function recomputeScoreboard(){
+  let winsA=0,winsB=0;
+
+  for(const m of [...state.matchesM,...state.matchesF]){
+    const code=winnerCode(m.scoreA,m.scoreB);
+    if(code==="A") winsA++;
+    if(code==="B") winsB++;
+  }
+  const mixCode = winnerCode(state.mixed?.scoreA, state.mixed?.scoreB);
+  if(mixCode==="A") winsA++;
+  if(mixCode==="B") winsB++;
+
+  const evCode = winnerCode(state.event?.scoreA, state.event?.scoreB);
+  if(evCode==="A") winsA++;
+  if(evCode==="B") winsB++;
+
+  $("winsA").textContent=winsA;
+  $("winsB").textContent=winsB;
+
+  let champ="—";
+  if(winsA>winsB) champ="A팀";
+  else if(winsB>winsA) champ="B팀";
+  $("champion").textContent=champ;
+}
+
+/* ===================== EXCEL PARSE (FIXED) ===================== */
+function guessColumn(headers,cands){
+  const lower=headers.map(h=>(h??"").toString().trim().toLowerCase());
+  for(const cand of cands){
+    const idx=lower.findIndex(h=>h.includes(cand));
+    if(idx!==-1) return idx;
+  }
+  return -1;
+}
+function parseRowsAsData(rows, useHeader){
+  if(!rows || !rows.length) return [];
+  let startRow = 0;
+  let nI=0, yI=1, gI=2;
+
+  if(useHeader){
+    const headers = rows[0].map(x=>(x??"").toString());
+    const idxName=guessColumn(headers,["이름","성명","name"]);
+    const idxYear=guessColumn(headers,["출생연도","출생","year","birth","년도","나이","연도"]);
+    const idxGender=guessColumn(headers,["성별","남여","gender","sex"]);
+    nI = (idxName!==-1)?idxName:0;
+    yI = (idxYear!==-1)?idxYear:1;
+    gI = (idxGender!==-1)?idxGender:2;
+    startRow = 1;
+  }
+
+  const out=[];
+  for(let r=startRow;r<rows.length;r++){
+    const row=rows[r] || [];
+    const name=(row[nI]??"").toString().trim();
+    if(!name) continue;
+    const year = normalizeYear(row[yI]);
+    const gender = normGender(row[gI]);
+    if(!Number.isFinite(year)) continue;
+    if(gender==="미정") continue;
+    out.push({name,year,gender});
+  }
+  return out;
+}
+
+async function loadExcelFile(file){
+  const buf=await file.arrayBuffer();
+  const wb=XLSX.read(new Uint8Array(buf), {type:"array"});
+  const ws=wb.Sheets[wb.SheetNames[0]];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+
+  const withHeader = parseRowsAsData(rows, true);
+  const withoutHeader = parseRowsAsData(rows, false);
+
+  const picked = (withHeader.length >= withoutHeader.length) ? withHeader : withoutHeader;
+  return picked;
+}
+
+/* ===================== MANUAL PARSE ===================== */
+function parseManualLines(text){
+  const lines=(text||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+  const out=[]; const failed=[];
+  const re=/^(.+?)\s+(\d{4})\s+(남|여|남자|여자|M|F)\s*$/i;
+  for(const line of lines){
+    const m=line.match(re);
+    if(!m){ failed.push(line); continue; }
+    const name=m[1].trim();
+    const year=parseInt(m[2],10);
+    const gender=normGender(m[3]);
+    if(!(year>=1900&&year<=2099)){ failed.push(line+"  (연도 범위 오류)"); continue; }
+    if(gender==="미정"){ failed.push(line+"  (성별 인식 실패)"); continue; }
+    out.push({name,year,gender});
+  }
+  return {out,failed};
+}
+function removeByNames(names){
+  const set=new Set(names.map(n=>n.trim()).filter(Boolean));
+  if(!set.size) return {removed:0, notFound:[]};
+  const before=state.people.length;
+  const existed=new Set(state.people.map(p=>p.name));
+  state.people=state.people.filter(p=>!set.has(p.name));
+  state.teamA=state.teamA.filter(p=>!set.has(p.name));
+  state.teamB=state.teamB.filter(p=>!set.has(p.name));
+  const removed=before-state.people.length;
+  const notFound=[...set].filter(n=>!existed.has(n));
+  return {removed, notFound};
+}
+
+/* ===================== MATCH GENERATION ===================== */
+function makeMatchesAndMixed(resetScores=true){
+  const mRes = makeStrictDoubles4("남","M");
+  const fRes = makeStrictDoubles4("여","F");
+
+  state.matchesM = mRes.matches;
+  state.matchesF = fRes.matches;
+
+  renderLeftovers(
+    `남자 남는 인원: A팀 ${mRes.leftA.length}명 / B팀 ${mRes.leftB.length}명`,
+    `여자 남는 인원: A팀 ${fRes.leftA.length}명 / B팀 ${fRes.leftB.length}명`
+  );
+
+  const used = usedSetFromMatches();
+  const totalLeft = mRes.leftA.length + mRes.leftB.length + fRes.leftA.length + fRes.leftB.length;
+
+  if(totalLeft===0){
+    state.mixed = {slots:null, scoreA:"", scoreB:"", note:"남는 인원이 없어 혼합복식을 생성하지 않았습니다."};
+  } else {
+    const built = buildMixedOneMatch(mRes.leftA, fRes.leftA, mRes.leftB, fRes.leftB, used);
+    state.mixed = {slots: built.slots, scoreA:"", scoreB:"", note: built.note};
+  }
+
+  if(resetScores){
+    for(const m of [...state.matchesM,...state.matchesF]){
+      m.scoreA=""; m.scoreB="";
+    }
+    state.mixed.scoreA=""; state.mixed.scoreB="";
+  }
+
+  renderMatches();
+  renderMixed();
+  recomputeScoreboard();
+}
+
+/* ===================== MAIN RENDER ===================== */
 function renderAll(){
   renderCounts();
   renderTeamLists();
@@ -965,41 +1098,59 @@ function renderAll(){
   applyLockUI();
 }
 
-// Buttons
+/* ===================== BUTTONS ===================== */
 $("btnPrint").addEventListener("click", ()=>window.print());
 
+$("btnUnlock").addEventListener("click", ()=>{
+  if(isUnlocked()){ setUnlocked(false); return; }
+  const pw = prompt("관리자 비밀번호를 입력하세요.");
+  if(pw===null) return;
+  if(pw===ADMIN_PASSWORD) setUnlocked(true);
+  else alert("비밀번호가 올바르지 않습니다.");
+});
+
 $("btnReset").addEventListener("click", ()=>{
-  if(!confirm("이 기기 저장된 명단/경기/점수까지 모두 초기화할까요?")) return;
+  if(!confirm("이 기기 저장된 명단/팀/경기/점수까지 모두 초기화할까요?")) return;
   localStorage.removeItem(STORAGE_KEY_STATE);
   localStorage.removeItem(STORAGE_KEY_LOCK);
+
   state.people=[]; state.teamA=[]; state.teamB=[];
   state.matchesM=[]; state.matchesF=[];
-  state.mixed={slots:null,scoreA:"",scoreB:""};
+  state.mixed={slots:null,scoreA:"",scoreB:"",note:""};
   state.event={A:[],B:[],scoreA:"",scoreB:""};
   state.gift={win:[],lose:[]};
+
   $("manualInput").value=""; $("removeInput").value="";
   $("addedManual").textContent="(없음)";
   $("failedManual").textContent="(없음)";
   $("removeResult").textContent="(없음)";
   $("giftNote").textContent="";
+
   renderAll();
   alert("초기화 완료");
 });
 
-// Excel upload
 $("fileInput").addEventListener("change", async (e)=>{
   const file=e.target.files?.[0];
   if(!file) return;
-  if(!isUnlocked()){ alert("뷰어 모드에서는 업로드할 수 없습니다."); e.target.value=""; return; }
+  if(!isUnlocked()){
+    alert("뷰어 모드에서는 업로드할 수 없습니다.");
+    e.target.value="";
+    return;
+  }
   try{
     const list=await loadExcelFile(file);
-    state.people=dedupePeople([...state.people,...list]);
-    saveStateDebounced();
-    alert(`업로드 완료: ${list.length}명`);
-    renderAll();
+    if(!list.length){
+      alert("엑셀에서 읽을 수 있는 데이터가 없습니다. (이름/연도/성별 형식을 확인)");
+    }else{
+      state.people=dedupePeople([...state.people,...list]);
+      saveStateDebounced();
+      alert(`업로드 완료: ${list.length}명`);
+      renderAll();
+    }
   }catch(err){
     console.error(err);
-    alert("엑셀 읽기 실패: 파일 형식/시트 구조를 확인해주세요.");
+    alert("엑셀 읽기 실패: 파일이 손상되었거나 시트 구조가 다를 수 있습니다.");
   }finally{
     e.target.value="";
   }
@@ -1009,12 +1160,14 @@ $("btnClearPeople").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   state.people=[]; state.teamA=[]; state.teamB=[];
   state.matchesM=[]; state.matchesF=[];
-  state.mixed={slots:null,scoreA:"",scoreB:""};
+  state.mixed={slots:null,scoreA:"",scoreB:"",note:""};
   state.event={A:[],B:[],scoreA:"",scoreB:""};
   state.gift={win:[],lose:[]};
+  $("giftNote").textContent="";
   saveStateDebounced();
   renderAll();
 });
+
 $("btnNormalize").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   state.people=dedupePeople(state.people);
@@ -1023,7 +1176,6 @@ $("btnNormalize").addEventListener("click", ()=>{
   renderAll();
 });
 
-// Manual add
 $("btnAddManual").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   const {out,failed}=parseManualLines($("manualInput").value);
@@ -1033,6 +1185,7 @@ $("btnAddManual").addEventListener("click", ()=>{
   saveStateDebounced();
   renderAll();
 });
+
 $("btnClearManual").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   $("manualInput").value="";
@@ -1040,106 +1193,70 @@ $("btnClearManual").addEventListener("click", ()=>{
   $("failedManual").textContent="(없음)";
 });
 
-// Manual remove
 $("btnRemoveByName").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   const names=($("removeInput").value||"").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
   const {removed,notFound}=removeByNames(names);
+
+  $("removeResult").textContent = [
+    `제외된 인원: ${removed}명`,
+    notFound.length?`명단에 없던 이름: ${notFound.join(", ")}`:""
+  ].filter(Boolean).join("\n") || "(없음)";
+
+  if(state.teamA.length || state.teamB.length) assignTeamsCross();
+
   state.matchesM=[]; state.matchesF=[];
-  state.mixed={slots:null,scoreA:"",scoreB:""};
+  state.mixed={slots:null,scoreA:"",scoreB:"",note:""};
   state.event={A:[],B:[],scoreA:"",scoreB:""};
   state.gift={win:[],lose:[]};
+  $("giftNote").textContent="";
 
-  $("removeResult").textContent = [`제외된 인원: ${removed}명`, notFound.length?`명단에 없던 이름: ${notFound.join(", ")}`:""].filter(Boolean).join("\n") || "(없음)";
-  if(state.teamA.length || state.teamB.length) assignTeamsCross();
   saveStateDebounced();
   renderAll();
 });
+
 $("btnClearRemove").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   $("removeInput").value="";
   $("removeResult").textContent="(없음)";
 });
 
-// Assign teams
 $("btnAssign").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   if(state.people.length<2){ alert("명단을 먼저 넣어주세요."); return; }
   assignTeamsCross();
   state.matchesM=[]; state.matchesF=[];
-  state.mixed={slots:null,scoreA:"",scoreB:""};
+  state.mixed={slots:null,scoreA:"",scoreB:"",note:""};
   state.event={A:[],B:[],scoreA:"",scoreB:""};
   state.gift={win:[],lose:[]};
+  $("giftNote").textContent="";
   saveStateDebounced();
   renderAll();
 });
 
-// ✅ Make matches + Mixed 1
 $("btnMakeMatches").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   if(!state.teamA.length && !state.teamB.length) assignTeamsCross();
-
-  const mRes = makeStrictDoubles4("남","M");
-  const fRes = makeStrictDoubles4("여","F");
-  state.matchesM = mRes.matches;
-  state.matchesF = fRes.matches;
-
-  // leftovers text
-  const leftMtxt = `남자 남는 인원: A팀 ${mRes.leftA.length}명 / B팀 ${mRes.leftB.length}명`;
-  const leftFtxt = `여자 남는 인원: A팀 ${fRes.leftA.length}명 / B팀 ${fRes.leftB.length}명`;
-  renderLeftovers(leftMtxt, leftFtxt);
-
-  // mixed build
-  const used = usedSetFromMatches();
-  const leftAm = mRes.leftA;
-  const leftBm = mRes.leftB;
-  const leftAf = fRes.leftA;
-  const leftBf = fRes.leftB;
-
-  const totalLeft = leftAm.length+leftBm.length+leftAf.length+leftBf.length;
-
-  if(totalLeft===0){
-    // 남는 인원 없으면 혼복은 선택사항 -> 여기서는 "없음"
-    state.mixed = {slots:null, scoreA:"", scoreB:"", note:"남는 인원이 없어 혼합복식을 생성하지 않았습니다."};
-  } else {
-    const built = buildMixedOneMatch(leftAm,leftAf,leftBm,leftBf, used);
-    state.mixed = {slots: built.slots, scoreA:"", scoreB:"", note: built.note};
-  }
-
-  // event & gift keep (don’t wipe)
+  makeMatchesAndMixed(true);
   saveStateDebounced();
   renderAll();
 });
 
-// Event pick
 $("btnEventPick").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
-  if(!state.teamA.length || !state.teamB.length){
-    alert("먼저 팀 배정(A/B)을 해주세요.");
-    return;
-  }
-  pickEventPlayers();
+  const ok = pickEventPlayers();
+  if(!ok) return;
   saveStateDebounced();
   renderAll();
 });
 
-// Gift order
 $("btnGiftOrder").addEventListener("click", ()=>{
   if(!isUnlocked()) return;
   makeGiftOrder();
   saveStateDebounced();
 });
 
-// Disable inputs when locked
-function bindMixedEventOnInit(){
-  bindMixedScore();
-  bindEventScore();
-}
-bindMixedEventOnInit();
-
-// Team drag changes reset matches already handled in setupTeamSortables()
-
-// Initial load
+/* ===================== INIT ===================== */
 loadStateFromStorage();
 applyLockUI();
 renderAll();
