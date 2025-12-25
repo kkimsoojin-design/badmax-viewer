@@ -1,0 +1,1188 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>배드맥스 월례대회</title>
+
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- SheetJS (xlsx) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <!-- SortableJS (drag & drop) -->
+  <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
+
+  <style>
+    .watermark {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      display: grid;
+      place-items: center;
+      opacity: 0.5; /* 요청: 50 */
+      filter: grayscale(100%) blur(1px);
+      transform: rotate(-10deg);
+    }
+    .watermark img { width: min(700px, 70vw); height: auto; }
+    .content-layer { position: relative; z-index: 1; }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; }
+      .print-card { box-shadow: none !important; border: 1px solid #e5e7eb !important; }
+      input, textarea { border: 0 !important; background: transparent !important; }
+      .watermark { opacity: 0.2; }
+      details { border: 1px solid #e5e7eb !important; }
+      summary { display:none !important; } /* 인쇄 시 이벤트는 펼친 상태만 보이게(기본 open 권장) */
+    }
+  </style>
+</head>
+
+<body class="bg-slate-50 text-slate-900">
+  <!-- 워터마크 -->
+  <div class="watermark" id="watermark" style="display:none;">
+    <img id="watermarkImg" alt="BADMAX watermark" />
+  </div>
+
+  <div class="content-layer max-w-6xl mx-auto p-4 md:p-6">
+
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-5">
+      <div class="flex items-start gap-3">
+        <div class="shrink-0">
+          <img id="brandLogo" class="w-14 h-14 rounded-2xl object-contain bg-white border border-slate-200 shadow-sm p-1"
+               alt="BADMAX Logo" />
+        </div>
+        <div>
+          <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">
+            배드맥스 <span id="ymBadge" class="px-2 py-1 rounded-xl font-extrabold"></span> 월례대회
+          </h1>
+        </div>
+      </div>
+
+      <div class="no-print flex gap-2 flex-wrap">
+        <label class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100 cursor-pointer">
+          로고
+          <input id="logoInput" type="file" accept="image/*" class="hidden" />
+        </label>
+        <button id="btnPrint" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-800">인쇄/출력</button>
+        <button id="btnReset" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">초기화</button>
+      </div>
+    </div>
+
+    <!-- Upload + Current count -->
+    <div class="no-print grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-lg mb-2">1) 엑셀 업로드</h2>
+        <input id="fileInput" type="file" accept=".xlsx,.xls" class="w-full block p-2 border rounded-xl" />
+
+        <div class="mt-3 flex gap-2 flex-wrap">
+          <button id="btnClearPeople" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+            명단 비우기
+          </button>
+          <button id="btnNormalize" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">
+            정리(중복 제거)
+          </button>
+        </div>
+      </div>
+
+      <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-lg mb-2">현재 인원</h2>
+        <div class="flex items-center justify-between">
+          <div class="text-slate-600">전체</div>
+          <div id="countAll" class="text-3xl font-extrabold">0</div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mt-3">
+          <div class="rounded-2xl border border-slate-200 p-3">
+            <div class="text-slate-600 text-sm">남</div>
+            <div id="countM" class="text-2xl font-bold mt-1">0</div>
+          </div>
+          <div class="rounded-2xl border border-slate-200 p-3">
+            <div class="text-slate-600 text-sm">여</div>
+            <div id="countF" class="text-2xl font-bold mt-1">0</div>
+          </div>
+        </div>
+
+        <div id="warnBox" class="mt-3 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2 hidden"></div>
+
+        <div class="mt-3 no-print grid grid-cols-1 gap-2">
+          <button id="btnAssign" class="w-full px-4 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold hover:bg-emerald-500">
+            팀 배정(A/B)
+          </button>
+          <button id="btnMakeMatches" class="w-full px-4 py-3 rounded-2xl bg-indigo-600 text-white font-extrabold hover:bg-indigo-500">
+            경기 생성(남복/여복/혼복)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual add/remove -->
+    <div class="no-print grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-lg mb-2">2) 수동 추가</h2>
+        <textarea id="manualInput"
+          class="w-full min-h-[110px] p-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="예) 홍길동 1998 남&#10;김미송 1991 여"></textarea>
+
+        <div class="mt-3 flex gap-2 flex-wrap">
+          <button id="btnAddManual" class="px-4 py-2 rounded-xl bg-slate-900 text-white font-semibold hover:bg-slate-800">추가</button>
+          <button id="btnClearManual" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">입력칸 비우기</button>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-sm font-bold text-slate-700 mb-1">추가된 인원</div>
+          <pre id="addedManual" class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap">(없음)</pre>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-sm font-bold text-slate-700 mb-1">추가 실패 라인</div>
+          <pre id="failedManual" class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap">(없음)</pre>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <h2 class="font-bold text-lg mb-2">3) 수동 제거(운영진 제외 등)</h2>
+        <textarea id="removeInput"
+          class="w-full min-h-[110px] p-3 border rounded-2xl focus:outline-none focus:ring-2 focus:ring-slate-300"
+          placeholder="이름만 한 줄씩 입력&#10;예) 김미송&#10;배연우"></textarea>
+
+        <div class="mt-3 flex gap-2 flex-wrap">
+          <button id="btnRemoveByName" class="px-4 py-2 rounded-xl bg-rose-600 text-white font-semibold hover:bg-rose-500">명단에서 제외</button>
+          <button id="btnClearRemove" class="px-4 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">입력칸 비우기</button>
+        </div>
+
+        <div class="mt-3">
+          <div class="text-sm font-bold text-slate-700 mb-1">제외 결과</div>
+          <pre id="removeResult" class="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700 whitespace-pre-wrap">(없음)</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- BIG Scoreboard -->
+    <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-5 md:p-6 mb-4">
+      <div class="flex items-center justify-between flex-wrap gap-3">
+        <h2 class="font-extrabold text-xl md:text-2xl">최종 스코어(승수)</h2>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+        <div class="rounded-3xl border border-slate-200 p-5 bg-slate-50 text-center">
+          <div class="text-slate-600 text-sm">A팀 승</div>
+          <div id="winsA" class="text-5xl font-extrabold mt-2">0</div>
+        </div>
+
+        <div class="rounded-3xl border border-slate-200 p-5 bg-slate-900 text-white text-center">
+          <div class="text-sm opacity-80">최종 우승</div>
+          <div id="champion" class="text-4xl md:text-5xl font-extrabold mt-2">—</div>
+        </div>
+
+        <div class="rounded-3xl border border-slate-200 p-5 bg-slate-50 text-center">
+          <div class="text-slate-600 text-sm">B팀 승</div>
+          <div id="winsB" class="text-5xl font-extrabold mt-2">0</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teams (draggable) -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+      <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-extrabold text-lg">A팀 명단 (드래그로 B팀 이동 가능)</h2>
+          <span id="countA" class="text-sm text-slate-600">0명</span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
+            <div class="text-sm font-bold text-slate-700 mb-2">남자</div>
+            <ul id="teamA_m" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
+          </div>
+          <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
+            <div class="text-sm font-bold text-slate-700 mb-2">여자</div>
+            <ul id="teamA_f" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+        <div class="flex items-center justify-between">
+          <h2 class="font-extrabold text-lg">B팀 명단 (드래그로 A팀 이동 가능)</h2>
+          <span id="countB" class="text-sm text-slate-600">0명</span>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
+            <div class="text-sm font-bold text-slate-700 mb-2">남자</div>
+            <ul id="teamB_m" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
+          </div>
+          <div class="rounded-2xl border border-slate-200 p-3 bg-slate-50">
+            <div class="text-sm font-bold text-slate-700 mb-2">여자</div>
+            <ul id="teamB_f" class="team-list flex flex-col gap-2 min-h-[48px]"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Matches -->
+    <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <h2 class="font-extrabold text-lg">경기표</h2>
+        <div class="no-print flex gap-2 flex-wrap">
+          <button id="btnExportJson" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">기록 저장</button>
+          <button id="btnImportJson" class="px-3 py-2 rounded-xl bg-white border border-slate-200 font-semibold hover:bg-slate-100">기록 불러오기</button>
+          <input id="jsonFile" type="file" accept="application/json" class="hidden" />
+        </div>
+      </div>
+
+      <div class="mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2">남자 복식(4인)</h3>
+          <div id="matchesM" class="flex flex-col gap-3"></div>
+        </div>
+        <div>
+          <h3 class="font-bold text-slate-800 mb-2">여자 복식(4인)</h3>
+          <div id="matchesF" class="flex flex-col gap-3"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mixed: full width at bottom -->
+    <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <h2 class="font-extrabold text-lg">혼합 복식(남은 인원 처리)</h2>
+        <div class="text-sm text-slate-600">
+          남복/여복 후 남는 인원은 <b>빈칸 없이 4명</b>으로만 경기 생성 (부족하면 1명만 랜덤 보충)
+        </div>
+      </div>
+      <div class="mt-3" id="matchesX" class="flex flex-col gap-3"></div>
+    </div>
+
+    <!-- Event: collapsible -->
+    <details class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">
+      <summary class="no-print cursor-pointer font-extrabold text-lg select-none">이벤트 경기 (펼치기/접기)</summary>
+
+      <div class="mt-3 flex items-center justify-between flex-wrap gap-2">
+        <h2 class="font-extrabold text-lg">이벤트 경기</h2>
+        <button id="btnSitminton" class="no-print px-4 py-2 rounded-2xl bg-amber-500 text-white font-extrabold hover:bg-amber-400">
+          앉은뱅이 민턴
+        </button>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div class="font-bold">A팀 랜덤 9명</div>
+          <div id="sitA" class="mt-2 text-sm whitespace-pre-wrap">—</div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div class="font-bold">B팀 랜덤 9명</div>
+          <div id="sitB" class="mt-2 text-sm whitespace-pre-wrap">—</div>
+        </div>
+      </div>
+
+      <div class="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <div class="font-extrabold">앉은뱅이 민턴 점수 (15점 선승)</div>
+          <div id="sitWinner" class="px-4 py-2 rounded-2xl font-extrabold text-lg bg-slate-200 text-slate-800">
+            승리: —
+          </div>
+        </div>
+
+        <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-slate-600">A 점수</label>
+            <input id="sitScoreA" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white" inputmode="numeric" placeholder="예: 15" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-600">B 점수</label>
+            <input id="sitScoreB" class="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white" inputmode="numeric" placeholder="예: 12" />
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Gift order generator -->
+    <div class="print-card bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <h2 class="font-extrabold text-lg">선물 배분용 순서</h2>
+        <button id="btnMakeOrder" class="no-print px-4 py-2 rounded-2xl bg-fuchsia-600 text-white font-extrabold hover:bg-fuchsia-500">
+          순서 생성하기
+        </button>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div class="font-bold">승리팀 순서</div>
+          <div id="orderWin" class="mt-2 text-sm whitespace-pre-wrap">—</div>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+          <div class="font-bold">패배팀 순서</div>
+          <div id="orderLose" class="mt-2 text-sm whitespace-pre-wrap">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // =========================
+    // 제목: 실행 시점의 연/월 자동 표시 + 강조 색상
+    // =========================
+    function setYearMonthTitle() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = d.getMonth() + 1;
+      const badge = `${y}년 ${m}월`;
+      const el = $("ymBadge");
+      el.textContent = badge;
+      el.className = "px-2 py-1 rounded-xl font-extrabold bg-indigo-600 text-white";
+      document.title = `배드맥스 ${badge} 월례대회`;
+    }
+    setYearMonthTitle();
+
+    // =========================
+    // 워터마크/로고
+    // =========================
+    function setLogo(src) {
+      $("brandLogo").src = src;
+      $("watermarkImg").src = src;
+      $("watermark").style.display = src ? "grid" : "none";
+    }
+    setLogo("");
+
+    $("logoInput").addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const url = URL.createObjectURL(file);
+      setLogo(url);
+    });
+
+    // =========================
+    // State
+    // =========================
+    const state = {
+      people: [],   // {name, year, gender}
+      teamA: [],
+      teamB: [],
+      matchesM: [],
+      matchesF: [],
+      matchesX: [],
+      sit: { A: [], B: [], scoreA: "", scoreB: "" }
+    };
+
+    // =========================
+    // Utils
+    // =========================
+    function normGender(g) {
+      const s = (g ?? "").toString().trim().toUpperCase();
+      if (["남","남자","M","MALE"].includes(s)) return "남";
+      if (["여","여자","F","FEMALE"].includes(s)) return "여";
+      return "미정";
+    }
+
+    function keyOf(p) { return `${p.name}|${p.year}|${p.gender}`; }
+
+    function dedupePeople(list) {
+      const seen = new Set();
+      const res = [];
+      for (const p of list) {
+        const key = keyOf(p);
+        if (!seen.has(key)) { seen.add(key); res.push(p); }
+      }
+      return res;
+    }
+
+    function sortByElderFirst(list) {
+      return [...list].sort((a,b) => (a.year - b.year) || a.name.localeCompare(b.name));
+    }
+
+    function countByGender(list) {
+      let m=0,f=0,u=0;
+      for (const p of list) {
+        if (p.gender==="남") m++;
+        else if (p.gender==="여") f++;
+        else u++;
+      }
+      return {m,f,u};
+    }
+
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i=a.length-1; i>0; i--) {
+        const j = Math.floor(Math.random()*(i+1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // 카드 테마
+    const THEMES = [
+      "bg-gradient-to-br from-sky-50 to-white border-sky-100",
+      "bg-gradient-to-br from-emerald-50 to-white border-emerald-100",
+      "bg-gradient-to-br from-indigo-50 to-white border-indigo-100",
+      "bg-gradient-to-br from-rose-50 to-white border-rose-100",
+      "bg-gradient-to-br from-amber-50 to-white border-amber-100",
+      "bg-gradient-to-br from-violet-50 to-white border-violet-100",
+      "bg-gradient-to-br from-cyan-50 to-white border-cyan-100",
+      "bg-gradient-to-br from-lime-50 to-white border-lime-100",
+    ];
+
+    // =========================
+    // Manual Add / Remove
+    // =========================
+    function parseManualLines(text) {
+      const lines = (text || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+      const out = [];
+      const failed = [];
+      const re = /^(.+?)\s+(\d{4})\s+(남|여|남자|여자|M|F)\s*$/i;
+
+      for (const line of lines) {
+        const m = line.match(re);
+        if (!m) { failed.push(line); continue; }
+        const name = m[1].trim();
+        const year = parseInt(m[2],10);
+        const gender = normGender(m[3]);
+        if (!(year >= 1900 && year <= 2099)) { failed.push(line + "  (연도 범위 오류)"); continue; }
+        if (gender === "미정") { failed.push(line + "  (성별 인식 실패)"); continue; }
+        out.push({ name, year, gender });
+      }
+      return { out, failed };
+    }
+
+    function removeByNames(names) {
+      const set = new Set(names.map(n => n.trim()).filter(Boolean));
+      if (!set.size) return { removed: 0, notFound: [] };
+
+      const before = state.people.length;
+      const existedNames = new Set(state.people.map(p => p.name));
+
+      state.people = state.people.filter(p => !set.has(p.name));
+      state.teamA = state.teamA.filter(p => !set.has(p.name));
+      state.teamB = state.teamB.filter(p => !set.has(p.name));
+
+      const after = state.people.length;
+      const removed = before - after;
+      const notFound = [...set].filter(n => !existedNames.has(n));
+      return { removed, notFound };
+    }
+
+    // =========================
+    // Excel parsing
+    // =========================
+    function guessColumn(headers, candidates) {
+      const lower = headers.map(h => (h ?? "").toString().trim().toLowerCase());
+      for (const cand of candidates) {
+        const idx = lower.findIndex(h => h.includes(cand));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    }
+
+    async function loadExcelFile(file) {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+      const sheetName = wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+      if (!rows.length) return [];
+
+      const headers = rows[0].map(x => x.toString());
+      const idxName = guessColumn(headers, ["이름","성명","name"]);
+      const idxYear = guessColumn(headers, ["출생연도","출생","year","birth","년도"]);
+      const idxGender = guessColumn(headers, ["성별","남여","gender","sex"]);
+
+      const nI = idxName !== -1 ? idxName : 0;
+      const yI = idxYear !== -1 ? idxYear : 1;
+      const gI = idxGender !== -1 ? idxGender : 2;
+
+      const out = [];
+      for (let r=1; r<rows.length; r++) {
+        const row = rows[r];
+        const name = (row[nI] ?? "").toString().trim();
+        if (!name) continue;
+
+        const year = parseInt((row[yI] ?? "").toString().trim(), 10);
+        const gender = normGender((row[gI] ?? "").toString().trim());
+
+        out.push({ name, year, gender });
+      }
+      return out;
+    }
+
+    // =========================
+    // Team assignment (요청 규칙)
+    // 남자 연장자부터 A/B 교차 -> 남자 끝 -> 여자 연장자부터 A/B 교차(이어감)
+    // =========================
+    function assignTeamsCross() {
+      const all = dedupePeople(state.people).filter(p => p.gender==="남" || p.gender==="여");
+      const males = sortByElderFirst(all.filter(p=>p.gender==="남"));
+      const females = sortByElderFirst(all.filter(p=>p.gender==="여"));
+
+      const A=[], B=[];
+      let toggle = true; // true => A
+
+      for (const p of males) { (toggle ? A : B).push(p); toggle = !toggle; }
+      for (const p of females) { (toggle ? A : B).push(p); toggle = !toggle; }
+
+      state.teamA = A;
+      state.teamB = B;
+    }
+
+    // =========================
+    // Winner
+    // =========================
+    function winnerCode(scoreA, scoreB) {
+      const a = parseInt(scoreA,10);
+      const b = parseInt(scoreB,10);
+      if (!Number.isFinite(a) || !Number.isFinite(b)) return "";
+      if (a > b) return "A";
+      if (b > a) return "B";
+      return "D";
+    }
+    function winnerText(code) {
+      if (code === "A") return "A팀";
+      if (code === "B") return "B팀";
+      if (code === "D") return "무승부";
+      return "—";
+    }
+    function winnerPillClass(code) {
+      if (code === "A") return "bg-emerald-600 text-white";
+      if (code === "B") return "bg-blue-600 text-white";
+      if (code === "D") return "bg-slate-600 text-white";
+      return "bg-slate-200 text-slate-800";
+    }
+
+    // =========================
+    // Match generation (중요 수정)
+    // - 남복/여복: 반드시 A 2명 + B 2명일 때만 경기 생성(4명 미만 금지)
+    // - 남은 인원(남/여 섞여도 됨): 4명 묶음으로 혼복 경기
+    //   * 1~3명 남으면: 이미 1경기 뛴 사람들 중에서 "필요 인원만" 랜덤 보충
+    //   * 보충으로 2경기 하는 사람은 혼복 보충으로만 발생. 최소화(필요 인원만큼)
+    // - 빈칸 슬롯 절대 금지
+    // =========================
+    function makeStrictDoubles4(gender, themeStart=0, prefix="M") {
+      const A = sortByElderFirst(state.teamA.filter(p=>p.gender===gender));
+      const B = sortByElderFirst(state.teamB.filter(p=>p.gender===gender));
+
+      const matches = [];
+      let i=1, theme=themeStart;
+
+      while (A.length >= 2 && B.length >= 2) {
+        const slots = [A.shift(), A.shift(), B.shift(), B.shift()]; // 반드시 4명
+        matches.push({
+          id: `${prefix}-${i++}`,
+          type: prefix,
+          themeIdx: (theme++ % THEMES.length),
+          slots,
+          scoreA: "",
+          scoreB: ""
+        });
+      }
+
+      return { matches, leftoverA: A, leftoverB: B };
+    }
+
+    function allParticipants() { return [...state.teamA, ...state.teamB]; }
+
+    function usedInMatches(matches) {
+      const used = new Set();
+      for (const m of matches) for (const p of (m.slots||[])) used.add(keyOf(p));
+      return used;
+    }
+
+    // 남은 인원들 모으기
+    function collectLeftovers(leftMale, leftFemale) {
+      // leftMale/leftFemale: {A:[],B:[]} 형태로 받는 게 아니라 이미 풀로 전달
+      return [...leftMale, ...leftFemale];
+    }
+
+    // 혼복 4명 슬롯 만들기: 가능한 A/B 균형을 우선하고, 성별은 제한하지 않음(남은 인원 처리용)
+    // 슬롯 정의: [A1, A2, B1, B2] (팀당 2명)
+    function makeMixedFromRemainders(remainders, alreadyUsedSet, themeStart=0) {
+      const matches = [];
+      let theme = themeStart;
+      let idx = 1;
+
+      // 팀별 남은 인원 분리
+      const remA = remainders.filter(p => state.teamA.some(x => keyOf(x)===keyOf(p)));
+      const remB = remainders.filter(p => state.teamB.some(x => keyOf(x)===keyOf(p)));
+
+      let poolA = shuffle(remA);
+      let poolB = shuffle(remB);
+
+      // 보충 풀(이미 경기한 사람): 2경기 허용은 여기서만.
+      const played = allParticipants().filter(p => alreadyUsedSet.has(keyOf(p)));
+      const playedA = shuffle(played.filter(p => state.teamA.some(x => keyOf(x)===keyOf(p))));
+      const playedB = shuffle(played.filter(p => state.teamB.some(x => keyOf(x)===keyOf(p))));
+
+      function take2(pool, fallbackPool) {
+        const res = [];
+        while (res.length < 2 && pool.length) res.push(pool.shift());
+        while (res.length < 2 && fallbackPool.length) res.push(fallbackPool.shift());
+        return res;
+      }
+
+      // 1) 가능한 한 남은 인원으로 4명(각 팀 2명) 경기 만들기
+      while (poolA.length >= 2 && poolB.length >= 2) {
+        const a2 = take2(poolA, []); // 이미 2명 확보됨
+        const b2 = take2(poolB, []);
+        matches.push({
+          id: `X-${idx++}`,
+          type: "X",
+          themeIdx: (theme++ % THEMES.length),
+          slots: [a2[0], a2[1], b2[0], b2[1]],
+          scoreA: "",
+          scoreB: ""
+        });
+      }
+
+      // 2) 4명이 안 되는 잔여(1~3명) 처리: 필요 인원만 보충
+      // 잔여는 팀 상관없이 존재할 수 있으나, "한 경기"를 만들기 위해 팀당 2명 구조를 맞춘다.
+      const leftoverA = poolA;
+      const leftoverB = poolB;
+      const totalLeft = leftoverA.length + leftoverB.length;
+
+      if (totalLeft > 0) {
+        // 팀별 필요한 수
+        const needA = Math.max(0, 2 - leftoverA.length);
+        const needB = Math.max(0, 2 - leftoverB.length);
+
+        const aPicked = [...leftoverA, ...playedA.splice(0, needA)].slice(0, 2);
+        const bPicked = [...leftoverB, ...playedB.splice(0, needB)].slice(0, 2);
+
+        // 만약 어떤 팀에서 2명이 절대 안 나오면(해당 팀 인원이 너무 적은 극단 상황)
+        // -> 경기 자체 생성 불가 (빈칸 금지)
+        if (aPicked.length === 2 && bPicked.length === 2) {
+          matches.push({
+            id: `X-${idx++}`,
+            type: "X",
+            themeIdx: (theme++ % THEMES.length),
+            slots: [aPicked[0], aPicked[1], bPicked[0], bPicked[1]],
+            scoreA: "",
+            scoreB: ""
+          });
+        }
+      }
+
+      return matches;
+    }
+
+    function regenerateMatches() {
+      // 남복/여복은 "4명 충족" 시에만 생성
+      const m = makeStrictDoubles4("남", 0, "M");
+      state.matchesM = m.matches;
+
+      const f = makeStrictDoubles4("여", state.matchesM.length, "F");
+      state.matchesF = f.matches;
+
+      // 남은 인원(남/여) 모으기
+      const leftovers = [...m.leftoverA, ...m.leftoverB, ...f.leftoverA, ...f.leftoverB];
+
+      // 이미 사용된 사람(남복/여복)
+      const used = new Set([...usedInMatches(state.matchesM), ...usedInMatches(state.matchesF)]);
+
+      // 혼복 생성: 남은 인원으로 4명 구성, 부족하면 "필요 인원만" 랜덤 보충
+      state.matchesX = makeMixedFromRemainders(leftovers, used, state.matchesM.length + state.matchesF.length);
+
+      renderMatches();
+      recomputeScoreboard();
+    }
+
+    // =========================
+    // Render counts / teams
+    // =========================
+    function renderCounts() {
+      state.people = dedupePeople(state.people);
+      const {m,f,u} = countByGender(state.people);
+
+      $("countAll").textContent = state.people.length;
+      $("countM").textContent = m;
+      $("countF").textContent = f;
+
+      const warn = [];
+      if (u > 0) warn.push(`성별 미정 ${u}명(정리 필요)`);
+      if (state.people.length === 0) warn.push("명단이 비어있습니다.");
+      $("warnBox").textContent = warn.join(" / ");
+      $("warnBox").classList.toggle("hidden", warn.length===0);
+    }
+
+    function emptyLi() {
+      return `<li class="text-sm text-slate-500 px-3 py-2 rounded-xl border border-dashed border-slate-200 bg-white">(비어있음)</li>`;
+    }
+
+    function teamLi(p, idx) {
+      const badge = p.gender==="남"
+        ? "bg-sky-50 text-sky-700 border-sky-200"
+        : "bg-pink-50 text-pink-700 border-pink-200";
+      return `
+        <li class="team-item flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white cursor-grab active:cursor-grabbing"
+            data-name="${p.name}" data-year="${p.year}" data-gender="${p.gender}">
+          <div class="min-w-0">
+            <div class="font-semibold truncate">
+              <span class="text-slate-500 mr-2">${idx}.</span>${p.name}
+              <span class="text-slate-400">(${p.year})</span>
+            </div>
+          </div>
+          <span class="text-xs px-2 py-1 rounded-full border ${badge}">${p.gender}</span>
+        </li>
+      `;
+    }
+
+    function renderTeamLists() {
+      $("countA").textContent = `${state.teamA.length}명`;
+      $("countB").textContent = `${state.teamB.length}명`;
+
+      const Am = sortByElderFirst(state.teamA.filter(p=>p.gender==="남"));
+      const Af = sortByElderFirst(state.teamA.filter(p=>p.gender==="여"));
+      const Bm = sortByElderFirst(state.teamB.filter(p=>p.gender==="남"));
+      const Bf = sortByElderFirst(state.teamB.filter(p=>p.gender==="여"));
+
+      $("teamA_m").innerHTML = Am.length ? Am.map((p,i)=>teamLi(p, i+1)).join("") : emptyLi();
+      $("teamA_f").innerHTML = Af.length ? Af.map((p,i)=>teamLi(p, i+1)).join("") : emptyLi();
+      $("teamB_m").innerHTML = Bm.length ? Bm.map((p,i)=>teamLi(p, i+1)).join("") : emptyLi();
+      $("teamB_f").innerHTML = Bf.length ? Bf.map((p,i)=>teamLi(p, i+1)).join("") : emptyLi();
+
+      setupTeamSortables();
+    }
+
+    function setupTeamSortables() {
+      const lists = ["teamA_m","teamA_f","teamB_m","teamB_f"].map(id => document.getElementById(id));
+      for (const ul of lists) {
+        if (ul._sortable) ul._sortable.destroy();
+        ul._sortable = new Sortable(ul, {
+          group: "teams",
+          animation: 150,
+          ghostClass: "opacity-50",
+          onEnd: () => {
+            syncTeamsFromDOM();
+            if (state.matchesM.length || state.matchesF.length || state.matchesX.length) {
+              regenerateMatches();
+            } else {
+              renderTeamLists();
+            }
+          }
+        });
+      }
+    }
+
+    function syncTeamsFromDOM() {
+      const readList = (id) => {
+        const ul = document.getElementById(id);
+        const items = Array.from(ul.querySelectorAll("li.team-item"));
+        const res = [];
+        for (const li of items) {
+          const name = li.dataset.name;
+          const year = parseInt(li.dataset.year,10);
+          const gender = li.dataset.gender;
+          if (name && Number.isFinite(year) && (gender==="남"||gender==="여")) res.push({ name, year, gender });
+        }
+        return res;
+      };
+
+      const A = [...readList("teamA_m"), ...readList("teamA_f")];
+      const B = [...readList("teamB_m"), ...readList("teamB_f")];
+
+      state.teamA = sortByElderFirst(A.filter(p=>p.gender==="남")).concat(sortByElderFirst(A.filter(p=>p.gender==="여")));
+      state.teamB = sortByElderFirst(B.filter(p=>p.gender==="남")).concat(sortByElderFirst(B.filter(p=>p.gender==="여")));
+
+      renderTeamLists();
+    }
+
+    // =========================
+    // Match cards (빈칸 금지로 label에서 "(빈칸)" 제거)
+    // =========================
+    function matchCard(m) {
+      const theme = THEMES[m.themeIdx % THEMES.length];
+      const code = winnerCode(m.scoreA, m.scoreB);
+      const pill = winnerPillClass(code);
+      const wt = winnerText(code);
+
+      const label = (p) => `${p.name} (${p.year})`;
+
+      const slotsHtml = `
+        <ul class="mt-2 flex flex-col gap-2">
+          ${[0,1,2,3].map(i => `
+            <li class="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-white">
+              <div class="font-semibold truncate">${label(m.slots[i])}</div>
+              <span class="text-xs text-slate-500">${i<2 ? "A팀" : "B팀"}</span>
+            </li>
+          `).join("")}
+        </ul>
+      `;
+
+      return `
+        <div class="rounded-2xl border ${theme} p-3">
+          <div class="flex items-start justify-between gap-2">
+            <div class="font-extrabold">경기 ${m.id}</div>
+            <div id="winbox-${m.id}" class="px-4 py-2 rounded-2xl font-extrabold text-lg ${pill}">
+              승리: <span id="winner-${m.id}">${wt}</span>
+            </div>
+          </div>
+
+          ${slotsHtml}
+
+          <div class="mt-3 grid grid-cols-2 gap-2 items-center">
+            <div>
+              <label class="text-xs text-slate-600">A 점수</label>
+              <input class="scoreA w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                     inputmode="numeric" placeholder="예: 21" value="${m.scoreA ?? ''}"
+                     data-matchid="${m.id}" />
+            </div>
+            <div>
+              <label class="text-xs text-slate-600">B 점수</label>
+              <input class="scoreB w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                     inputmode="numeric" placeholder="예: 18" value="${m.scoreB ?? ''}"
+                     data-matchid="${m.id}" />
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    function findMatchById(id) {
+      return [...state.matchesM, ...state.matchesF, ...state.matchesX].find(x => x.id === id);
+    }
+
+    function updateWinnerUI(m) {
+      const code = winnerCode(m.scoreA, m.scoreB);
+      const wt = winnerText(code);
+      const box = document.getElementById(`winbox-${m.id}`);
+      const span = document.getElementById(`winner-${m.id}`);
+      if (span) span.textContent = wt;
+      if (box) box.className = `px-4 py-2 rounded-2xl font-extrabold text-lg ${winnerPillClass(code)}`;
+    }
+
+    function renderMatches() {
+      $("matchesM").innerHTML = state.matchesM.map(matchCard).join("");
+      $("matchesF").innerHTML = state.matchesF.map(matchCard).join("");
+      $("matchesX").innerHTML = state.matchesX.map(matchCard).join("");
+
+      document.querySelectorAll("input.scoreA").forEach(inp => {
+        inp.addEventListener("input", (e) => {
+          const id = e.target.dataset.matchid;
+          const m = findMatchById(id);
+          if (!m) return;
+          m.scoreA = e.target.value;
+          updateWinnerUI(m);
+          recomputeScoreboard();
+        });
+      });
+      document.querySelectorAll("input.scoreB").forEach(inp => {
+        inp.addEventListener("input", (e) => {
+          const id = e.target.dataset.matchid;
+          const m = findMatchById(id);
+          if (!m) return;
+          m.scoreB = e.target.value;
+          updateWinnerUI(m);
+          recomputeScoreboard();
+        });
+      });
+    }
+
+    function recomputeScoreboard() {
+      const all = [...state.matchesM, ...state.matchesF, ...state.matchesX];
+      let winsA = 0, winsB = 0;
+      for (const m of all) {
+        const code = winnerCode(m.scoreA, m.scoreB);
+        if (code === "A") winsA++;
+        if (code === "B") winsB++;
+      }
+      const sitCode = winnerCode(state.sit.scoreA, state.sit.scoreB);
+      if (sitCode === "A") winsA++;
+      if (sitCode === "B") winsB++;
+
+      $("winsA").textContent = winsA;
+      $("winsB").textContent = winsB;
+
+      let champ = "—";
+      if (winsA > winsB) champ = "A팀";
+      else if (winsB > winsA) champ = "B팀";
+      $("champion").textContent = champ;
+    }
+
+    // =========================
+    // 앉은뱅이 민턴
+    // =========================
+    function renderSit() {
+      $("sitA").textContent = (state.sit.A.map(p => p.name).join("\n")) || "—";
+      $("sitB").textContent = (state.sit.B.map(p => p.name).join("\n")) || "—";
+      const code = winnerCode(state.sit.scoreA, state.sit.scoreB);
+      $("sitWinner").textContent = `승리: ${winnerText(code)}`;
+      $("sitWinner").className = `px-4 py-2 rounded-2xl font-extrabold text-lg ${winnerPillClass(code)}`;
+    }
+
+    function makeSitminton() {
+      const A = shuffle(state.teamA);
+      const B = shuffle(state.teamB);
+      state.sit.A = A.slice(0, 9);
+      state.sit.B = B.slice(0, 9);
+      state.sit.scoreA = "";
+      state.sit.scoreB = "";
+      $("sitScoreA").value = "";
+      $("sitScoreB").value = "";
+      renderSit();
+      recomputeScoreboard();
+    }
+
+    // =========================
+    // Gift order generation
+    // =========================
+    function renderOrders(winList, loseList) {
+      $("orderWin").textContent = winList.length
+        ? winList.map((n,i)=>`${i+1}. ${n}`).join("\n")
+        : "—";
+      $("orderLose").textContent = loseList.length
+        ? loseList.map((n,i)=>`${i+1}. ${n}`).join("\n")
+        : "—";
+    }
+
+    function makeGiftOrder() {
+      const champ = $("champion").textContent.trim();
+      if (champ !== "A팀" && champ !== "B팀") {
+        alert("먼저 경기 점수를 입력해서 최종 우승팀을 확정해주세요.");
+        return;
+      }
+      const winTeam = champ === "A팀" ? state.teamA : state.teamB;
+      const loseTeam = champ === "A팀" ? state.teamB : state.teamA;
+
+      const winNames = shuffle(winTeam.map(p=>p.name));
+      const loseNames = shuffle(loseTeam.map(p=>p.name));
+
+      renderOrders(winNames, loseNames);
+    }
+
+    // =========================
+    // Render All
+    // =========================
+    function renderAll() {
+      renderCounts();
+      renderTeamLists();
+      renderMatches();
+      renderSit();
+      recomputeScoreboard();
+    }
+
+    // =========================
+    // Events
+    // =========================
+    $("btnPrint").addEventListener("click", () => window.print());
+
+    $("btnReset").addEventListener("click", () => {
+      if (!confirm("정말 초기화할까요?")) return;
+      state.people = [];
+      state.teamA = [];
+      state.teamB = [];
+      state.matchesM = [];
+      state.matchesF = [];
+      state.matchesX = [];
+      state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
+
+      $("manualInput").value = "";
+      $("removeInput").value = "";
+      $("fileInput").value = "";
+      $("addedManual").textContent = "(없음)";
+      $("failedManual").textContent = "(없음)";
+      $("removeResult").textContent = "(없음)";
+      $("sitScoreA").value = "";
+      $("sitScoreB").value = "";
+      $("orderWin").textContent = "—";
+      $("orderLose").textContent = "—";
+      renderAll();
+    });
+
+    $("btnClearPeople").addEventListener("click", () => {
+      state.people = [];
+      state.teamA = [];
+      state.teamB = [];
+      state.matchesM = [];
+      state.matchesF = [];
+      state.matchesX = [];
+      state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
+      $("addedManual").textContent = "(없음)";
+      $("failedManual").textContent = "(없음)";
+      $("removeResult").textContent = "(없음)";
+      $("orderWin").textContent = "—";
+      $("orderLose").textContent = "—";
+      renderAll();
+    });
+
+    $("btnNormalize").addEventListener("click", () => {
+      state.people = dedupePeople(state.people);
+      renderCounts();
+      alert("중복 제거 완료");
+    });
+
+    $("btnClearManual").addEventListener("click", () => {
+      $("manualInput").value = "";
+      $("addedManual").textContent = "(없음)";
+      $("failedManual").textContent = "(없음)";
+    });
+
+    $("btnClearRemove").addEventListener("click", () => {
+      $("removeInput").value = "";
+      $("removeResult").textContent = "(없음)";
+    });
+
+    $("fileInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        const list = await loadExcelFile(file);
+        state.people = dedupePeople([...state.people, ...list]);
+        renderCounts();
+        alert(`업로드 완료: ${list.length}명`);
+      } catch (err) {
+        console.error(err);
+        alert("엑셀 읽기 실패: 파일 형식/시트 구조를 확인해주세요.");
+      }
+    });
+
+    $("btnAddManual").addEventListener("click", () => {
+      const { out, failed } = parseManualLines($("manualInput").value);
+      state.people = dedupePeople([...state.people, ...out]);
+
+      $("addedManual").textContent = out.length ? out.map(p => `${p.name} (${p.year}) ${p.gender}`).join("\n") : "(없음)";
+      $("failedManual").textContent = failed.length ? failed.join("\n") : "(없음)";
+
+      renderCounts();
+      alert(`수동 추가: ${out.length}명` + (failed.length ? ` / 실패 ${failed.length}줄` : ""));
+    });
+
+    $("btnRemoveByName").addEventListener("click", () => {
+      const names = ($("removeInput").value || "").split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
+      const { removed, notFound } = removeByNames(names);
+
+      // 제외 후 경기/이벤트/순서 초기화
+      state.matchesM = [];
+      state.matchesF = [];
+      state.matchesX = [];
+      state.sit = { A: [], B: [], scoreA: "", scoreB: "" };
+      $("orderWin").textContent = "—";
+      $("orderLose").textContent = "—";
+
+      const msg = [
+        `제외된 인원: ${removed}명`,
+        notFound.length ? `명단에 없던 이름: ${notFound.join(", ")}` : ""
+      ].filter(Boolean).join("\n");
+
+      $("removeResult").textContent = msg || "(없음)";
+      renderCounts();
+
+      if (state.teamA.length || state.teamB.length) {
+        assignTeamsCross();
+        renderTeamLists();
+      }
+    });
+
+    $("btnAssign").addEventListener("click", () => {
+      if (state.people.length < 2) { alert("명단을 먼저 넣어주세요."); return; }
+      assignTeamsCross();
+      state.matchesM = [];
+      state.matchesF = [];
+      state.matchesX = [];
+      $("orderWin").textContent = "—";
+      $("orderLose").textContent = "—";
+      renderAll();
+      alert(`팀 배정 완료: A팀 ${state.teamA.length}명 / B팀 ${state.teamB.length}명`);
+    });
+
+    $("btnMakeMatches").addEventListener("click", () => {
+      if (!state.teamA.length && !state.teamB.length) assignTeamsCross();
+      regenerateMatches();
+      alert(`경기 생성 완료: 남복 ${state.matchesM.length} / 여복 ${state.matchesF.length} / 혼복 ${state.matchesX.length}`);
+    });
+
+    $("btnSitminton").addEventListener("click", () => {
+      if (!state.teamA.length || !state.teamB.length) {
+        alert("먼저 팀 배정을 해주세요.");
+        return;
+      }
+      makeSitminton();
+    });
+
+    $("sitScoreA").addEventListener("input", (e) => {
+      state.sit.scoreA = e.target.value;
+      renderSit();
+      recomputeScoreboard();
+    });
+    $("sitScoreB").addEventListener("input", (e) => {
+      state.sit.scoreB = e.target.value;
+      renderSit();
+      recomputeScoreboard();
+    });
+
+    $("btnMakeOrder").addEventListener("click", makeGiftOrder);
+
+    // =========================
+    // Save / Load JSON
+    // =========================
+    function download(filename, text) {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(new Blob([text], {type:"application/json"}));
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    $("btnExportJson").addEventListener("click", () => {
+      const payload = {
+        version: "4.0",
+        people: state.people,
+        teamA: state.teamA,
+        teamB: state.teamB,
+        matchesM: state.matchesM,
+        matchesF: state.matchesF,
+        matchesX: state.matchesX,
+        sit: state.sit,
+        exportedAt: new Date().toISOString()
+      };
+      download("badmax_record.json", JSON.stringify(payload, null, 2));
+    });
+
+    $("btnImportJson").addEventListener("click", () => $("jsonFile").click());
+
+    $("jsonFile").addEventListener("change", (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          state.people = data.people || [];
+          state.teamA = data.teamA || [];
+          state.teamB = data.teamB || [];
+          state.matchesM = data.matchesM || [];
+          state.matchesF = data.matchesF || [];
+          state.matchesX = data.matchesX || [];
+          state.sit = data.sit || { A: [], B: [], scoreA: "", scoreB: "" };
+
+          $("addedManual").textContent = "(없음)";
+          $("failedManual").textContent = "(없음)";
+          $("removeResult").textContent = "(없음)";
+          $("orderWin").textContent = "—";
+          $("orderLose").textContent = "—";
+
+          renderAll();
+          alert("기록 불러오기 완료");
+        } catch (err) {
+          console.error(err);
+          alert("JSON 불러오기 실패: 파일이 올바른지 확인해주세요.");
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    // initial
+    renderCounts();
+    renderTeamLists();
+    renderMatches();
+    renderSit();
+    recomputeScoreboard();
+  </script>
+</body>
+</html>
